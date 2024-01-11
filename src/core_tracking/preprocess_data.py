@@ -52,3 +52,53 @@ if __name__ == '__main__':
     # viewer = napari.view_image(image_data, scale=tuple(scale_vec))
 
     # Use otsu's method to get binarized image
+import dask
+import dask.array as da
+import aicsimageio
+
+def create_dummy_data(shape):
+    return da.random.random(shape, chunks=(100, 100, 100))
+
+def export_dask_array_to_ome_zarr(array, ome_zarr_path, array_name):
+    # Convert Dask array to NumPy array for export to OME-Zarr
+    array_np = array.compute()
+
+    # Export the array to OME-Zarr
+    aicsimageio.writers.ome_zarr.write_ome_zarr(ome_zarr_path, {array_name: array_np})
+
+def import_ome_zarr_file(ome_zarr_path):
+    # Read OME-Zarr file
+    zarr_reader = aicsimageio.readers.ome_zarr.OmeZarrReader(ome_zarr_path)
+
+    # Access a specific dataset (replace 'array_0' with the actual array name)
+    array_0 = zarr_reader.get_dataset("array_0")
+
+    # Convert NumPy array to Dask array
+    dask_array_0 = da.from_array(array_0, chunks=array_0.shape)
+
+    return dask_array_0
+
+if __name__ == "__main__":
+    # Create a list of 3D Dask arrays
+    array_list = [create_dummy_data((100, 100, 100)) for _ in range(5)]
+
+    # Specify the path to the output OME-Zarr file
+    ome_zarr_file_path = "output.ome.zarr"
+
+    # Export each Dask array to the same OME-Zarr file one at a time
+    for i, dask_array in enumerate(array_list):
+        # Create a unique array name for each array
+        array_name = f"array_{i}"
+
+        # Export the Dask array to the OME-Zarr file
+        export_dask_array_to_ome_zarr(dask_array, ome_zarr_file_path, array_name)
+
+        print(f"Array {i} exported to {ome_zarr_file_path} as {array_name}")
+
+    # Import the OME-Zarr file and access a Dask array
+    imported_dask_array = import_ome_zarr_file(ome_zarr_file_path)
+
+    # Perform operations on the imported Dask array if needed
+    # ...
+
+    print("Imported Dask array shape:", imported_dask_array.shape)
