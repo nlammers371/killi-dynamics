@@ -1,5 +1,12 @@
 import numpy as np
 import math
+import ntpath
+
+
+def path_leaf(path):
+    head, tail = ntpath.split(path)
+    return tail or ntpath.basename(head)
+
 def cart_to_sphere(xyz):
     ptsnew = np.zeros(xyz.shape)
     xy = xyz[:, 0]**2 + xyz[:, 1]**2
