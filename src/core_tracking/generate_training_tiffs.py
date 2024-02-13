@@ -23,9 +23,9 @@ if __name__ == "__main__":
     if not os.path.isdir(write_path):
         os.makedirs(write_path)
 
-    n_samples = 3
+    n_samples = 50
     suffix_vec = ["_xy", "_zx", "_zy"]
-    window_size = 128
+    window_size = 512
     overwrite_flag = False
     skip_labeled_flag = False
     if overwrite_flag:
@@ -35,7 +35,7 @@ if __name__ == "__main__":
     metadata_file_path = project_path + project_name + "_metadata.json"
 
     # specify time points to load
-    image_list = sorted(glob.glob(os.path.join(project_path + project_name + "*.tiff")))
+    image_list = sorted(glob.glob(os.path.join(project_path + project_name + "*t0001.tiff")))
     n_time_points = len(image_list)
 
     # load metadata
@@ -109,10 +109,10 @@ if __name__ == "__main__":
 
             slice_path = write_path + save_name + suffix + ".tiff"
 
-            rand_prefix = np.random.randint(0, 100000, 1)[0]
-            out_name = os.path.join(write_path,
-                                    f'{rand_prefix:06}' + '_' + save_name + suffix + f'{slice_num:03}')
-
+            # rand_prefix = np.random.randint(0, 100000, 1)[0]
+            # out_name = os.path.join(write_path,
+            #                         f'_t01_{rand_prefix:06}' + '_' + save_name + suffix + f'{slice_num:03}')
+            out_name = os.path.join(write_path, f'_t01_' + suffix + f'{slice_num:03}' + '_' + save_name)
             # print("Starting with raw label priors...")
             if slice_id == 0:
                 im_slice = image_data[slice_num, :, :]
