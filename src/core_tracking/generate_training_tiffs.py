@@ -35,7 +35,7 @@ if __name__ == "__main__":
     metadata_file_path = project_path + project_name + "_metadata.json"
 
     # specify time points to load
-    image_list = sorted(glob.glob(os.path.join(project_path + project_name + "*t0001.tiff")))
+    image_list = sorted(glob.glob(os.path.join(project_path + project_name + "*t0575.tiff")))
     n_time_points = len(image_list)
 
     # load metadata

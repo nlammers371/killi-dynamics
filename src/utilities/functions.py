@@ -11,7 +11,7 @@ def cart_to_sphere(xyz):
     ptsnew = np.zeros(xyz.shape)
     xy = xyz[:, 0]**2 + xyz[:, 1]**2
     ptsnew[:, 0] = np.sqrt(xy + xyz[:, 2]**2)
-    ptsnew[:, 1] = np.arctan2(np.sqrt(xy), xyz[:, 2]) # for elevation angle defined from Z-axis down
+    ptsnew[:, 1] = np.arctan2(np.sqrt(xy), xyz[:, 2])  # for elevation angle defined from Z-axis down
     ptsnew[:, 2] = np.arctan2(xyz[:, 1], xyz[:, 0])
     return ptsnew
 

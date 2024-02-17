@@ -134,13 +134,13 @@ def cellpose_segmentation(
         # Task-specific arguments
         seg_channel_label: Optional[str] = None,
         cell_diameter: float = 15,
-        cellprob_threshold: float = 0,
+        cellprob_threshold: float = -8,
         flow_threshold: float = 0.4,
         model_type: Literal["nuclei", "cyto", "cyto2"] = "nuclei",
         pretrained_model: Optional[str] = None,
         overwrite: Optional[bool] = False,
         return_probs: Optional[bool] = False,
-        xy_ds_factor: Optional[float] = 1.0,
+        ds_factor: Optional[float] = 1.0,
         # tiff_stack_mode = False,
         # pixel_res_input = None
 ) -> Dict[str, Any]:
@@ -180,7 +180,7 @@ def cellpose_segmentation(
     raw_directory = os.path.join(root, "built_data", project_name, '')
     # if tiff
 
-    save_directory = os.path.join(root, "built_data", "cellpose_output_test2", project_name, '')
+    save_directory = os.path.join(root, "built_data", "cellpose_output", project_name, '')
     if not os.path.isdir(save_directory):
         os.makedirs(save_directory)
 
@@ -201,7 +201,8 @@ def cellpose_segmentation(
     if not os.path.isdir(save_directory):
         os.makedirs(save_directory)
 
-    for im in tqdm(range(len(image_list))):
+    iter_i = 0
+    for im in tqdm(range(len(image_list))): #range(len(image_list[0] + image_list[575]))):
         image_path = image_list[im]
         im_name = path_leaf(image_path).replace(".tiff", "")
         # get time index
@@ -218,7 +219,7 @@ def cellpose_segmentation(
         # n_time_points = imObject.dims["T"][0]
 
         # make sure we are not accidentally up-sampling
-        assert xy_ds_factor >= 1.0
+        assert ds_factor >= 1.0
 
         # extract key image attributes
         # channel_names = imObject.channel_names  # list of channels and relevant info
@@ -248,12 +249,10 @@ def cellpose_segmentation(
         # rescale data
         dims_orig = data_zyx_raw.shape
 
-        if anisotropy_raw != 1:
-            dims_new = np.round([dims_orig[0], dims_orig[1] / xy_ds_factor, dims_orig[2] / xy_ds_factor]).astype(
-                int)
+        if ds_factor > 1:
+            dims_new = np.round([dims_orig[0] / ds_factor, dims_orig[1] / ds_factor, dims_orig[2] / ds_factor]).astype(int)
             data_zyx = resize(data_zyx_raw, dims_new, order=1, preserve_range=True).astype(np.uint16)
-
-            anisotropy = anisotropy_raw * dims_new[1] / dims_orig[1]
+            anisotropy = anisotropy_raw #* dims_new[1] / dims_orig[1]
         else:
             data_zyx = data_zyx_raw.copy()
             anisotropy = anisotropy_raw
@@ -276,7 +275,7 @@ def cellpose_segmentation(
         #         output_label_name = f"label_{ind_channel}"
 
         segment_flag = True
-        label_name = im_name + project_name + f"_t{t:03}_labels"
+        label_name = im_name + f"_t{t:03}_labels"
         label_path = os.path.join(save_directory, label_name)
         # if (not os.path.isfile(label_path + '.tif')) | overwrite:
         #     pass
@@ -299,6 +298,13 @@ def cellpose_segmentation(
             else:
                 model = models.CellposeModel(gpu=gpu, model_type=model_type)
 
+            if iter_i == 0:
+                # Save metadata to a JSON file
+                metadata_out_path = os.path.join(save_directory, "metadata.json")
+                with open(metadata_out_path, 'w') as json_file:
+                    json.dump(metadata, json_file)
+
+            metadata["cellpose_model"] = model
             # Initialize other things
             logging.info(f"Start cellpose_segmentation task for {image_path}")
             logging.info(f"do_3D: {do_3D}")
@@ -314,7 +320,7 @@ def cellpose_segmentation(
                 do_3D=do_3D,
                 anisotropy=anisotropy,
                 label_dtype=np.uint32,
-                diameter=cell_diameter / xy_ds_factor,
+                diameter=cell_diameter / ds_factor,
                 cellprob_threshold=cellprob_threshold,
                 flow_threshold=flow_threshold,
                 min_size=min_size,
@@ -322,10 +328,10 @@ def cellpose_segmentation(
                 return_probs=return_probs
             )
 
-            if xy_ds_factor > 1.0:
+            if ds_factor > 1.0:
                 image_mask_out = resize(image_mask, dims_orig, order=0, anti_aliasing=False,
                                         preserve_range=True)
-                image_probs_out = resize(image_probs, dims_orig, order=1)
+                image_probs_out = resize(image_probs, dims_orig, order=1, preserve_range=True)
 
             else:
                 image_mask_out = image_mask
@@ -339,7 +345,7 @@ def cellpose_segmentation(
                 tif.write(image_mask_out)
 
             if return_probs:
-                prob_name = im_name + "_" + project_name + f"_t{t:03}_probs"
+                prob_name = im_name + f"_t{t:03}_probs"
                 prob_path = os.path.join(save_directory, prob_name)
                 with TiffWriter(prob_path + '.tif', bigtiff=True) as tif:
                     tif.write(image_probs_out)
@@ -349,6 +355,8 @@ def cellpose_segmentation(
             #     tif.write(data_zyx)
 
             logging.info(f"End file save process, exit")
+
+            iter_i += 1
         else:
             print("skipping " + label_path)
 
@@ -361,14 +369,14 @@ if __name__ == "__main__":
     model_type = "cyto"
     output_label_name = "td-Tomato"
     seg_channel_label = "561"
-    xy_ds_factor = 1
+    ds_factor = 2
 
     # set path to CellPose model to use
-    pretrained_model = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\built_data\\231016_EXP40_LCP1_UVB_300mJ_WT_Timelapse_Raw\\cellpose\\models\\LCP-GFP-v5"
+    pretrained_model = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\built_data\\231016_EXP40_LCP1_UVB_300mJ_WT_Timelapse_Raw\\cellpose\\models\\LCP-GFP-v6"
 
     # set read/write paths
     root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\"
     project_name = "231016_EXP40_LCP1_UVB_300mJ_WT_Timelapse_Raw"
 
-    cellpose_segmentation(root=root, project_name=project_name, return_probs=True, xy_ds_factor=xy_ds_factor,
+    cellpose_segmentation(root=root, project_name=project_name, return_probs=True, ds_factor=ds_factor,
                           pretrained_model=pretrained_model, overwrite=overwrite)
