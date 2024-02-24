@@ -1,5 +1,7 @@
 import napari
 import os
+
+import pandas as pd
 import skimage.io as io
 from skimage.transform import resize
 import glob2 as glob
@@ -14,41 +16,45 @@ from src.utilities.functions import path_leaf
 from scipy.ndimage import distance_transform_edt
 from tqdm import tqdm
 
-def perform_mask_qc(root, project_name, prob_thresh=-8, cell_thickness=20, min_cell_size=135):
+def perform_mask_qc(root, project_name, prob_thresh=-8, cell_thickness=20, min_cell_size=135, n_points_fit=10000):
     
     # ger list of images
     # image_folder = os.path.join(root, project_name, "")
     # image_list = sorted(glob.glob(os.path.join(image_folder + "*.tiff")))
-    
+    metadata_folder = os.path.join(root, "metadata", project_name)
+    if not os.path.isdir(metadata_folder):
+        os.makedirs(metadata_folder)
+
     # prob datasets
-    label_folder = os.path.join(root, "cellpose_output", project_name, "")
+    label_folder = os.path.join(root, "built_data", "cellpose_output", project_name, "")
     prob_list = sorted(glob.glob(os.path.join(label_folder + "*_probs.tif")))
     
-    save_directory = os.path.join(root, "cleaned_cell_labels", project_name, "")
+    save_directory = os.path.join(root, "built_data", "cleaned_cell_labels", project_name, "")
     if not os.path.isdir(save_directory):
         os.makedirs(save_directory)
         
     print("loading data and making image masks...")
     # load metadata
-    metadata_file_path = os.path.join(label_folder, "metadata.json")
+    metadata_file_path = os.path.join(metadata_folder, "metadata.json")
     f = open(metadata_file_path)
     metadata = json.load(f)
     
     pixel_res_prob = np.asarray([metadata["ProbPhysicalSizeZ"], metadata["ProbPhysicalSizeY"], metadata["ProbPhysicalSizeX"]])
     
-    metadata_out_path = os.path.join(label_folder, "metadata.json")
-    with open(metadata_out_path, 'w') as json_file:
-        json.dump(metadata, json_file)
+    # metadata_out_path = os.path.join(label_folder, "metadata.json")
+    # with open(metadata_out_path, 'w') as json_file:
+    #     json.dump(metadata, json_file)
     
     
     # iter_i = 500
-    for iter_i in tqdm(range(len(prob_list))):
+    sphere_df_list = []
+    for iter_i in tqdm(range(0, len(prob_list))):
 
-        if iter_i == 0:
-            # Save metadata to a JSON file
-            metadata_out_path = os.path.join(save_directory, "metadata.json")
-            with open(metadata_out_path, 'w') as json_file:
-                json.dump(metadata, json_file)
+        # if iter_i == 0:
+        #     # Save metadata to a JSON file
+        #     metadata_out_path = os.path.join(save_directory, "metadata.json")
+        #     with open(metadata_out_path, 'w') as json_file:
+        #         json.dump(metadata, json_file)
                 
         # Load prob image
         # raw_image = io.imread(image_list[iter_i])
@@ -81,11 +87,16 @@ def perform_mask_qc(root, project_name, prob_thresh=-8, cell_thickness=20, min_c
         nc_z = z_ref[prob_mask]
         nc_y = y_ref[prob_mask]
         nc_x = x_ref[prob_mask]
-        
+
+        fit_indices = np.random.choice(range(len(nc_z)), np.min([n_points_fit, len(nc_z)]), replace=False)
         # fit to sphere
         center_point = np.empty((3, ))
-        radius, center_point[2], center_point[1], center_point[0] = sphereFit(nc_x, nc_y, nc_z)
-    
+        radius, center_point[2], center_point[1], center_point[0] = sphereFit(nc_x[fit_indices], nc_y[fit_indices], nc_z[fit_indices])
+        sphere_df = pd.DataFrame(center_point[np.newaxis, :], columns=["Z", "Y", "X"])
+        sphere_df["r"] = radius
+        sphere_df["t"] = iter_i
+        sphere_df["project"] = project_name
+        sphere_df_list.append(sphere_df)
         
         # convert reference arrays to spherical coordinages
         n_px = x_ref.size
@@ -95,7 +106,7 @@ def perform_mask_qc(root, project_name, prob_thresh=-8, cell_thickness=20, min_c
         r_ref = rpt_ref[:, 0]. reshape(x_ref.shape)
         p_ref = rpt_ref[:, 1]. reshape(x_ref.shape)
         t_ref = rpt_ref[:, 2]. reshape(x_ref.shape)
-        
+
         print("casting rays to check for refraction artifacts...")
         # subset to just those points that are part of a cell
         r_ref_vec = r_ref[prob_mask]
@@ -103,19 +114,19 @@ def perform_mask_qc(root, project_name, prob_thresh=-8, cell_thickness=20, min_c
         t_ref_vec = t_ref[prob_mask]
         index_vec = np.where(prob_mask.ravel())[0]
         label_vec = label_image[prob_mask]
-        
-        # r_min = np.floor(np.min(r_ref_vec))
-        r_max = np.ceil(radius + 100)
-        
+
+        r_min = np.percentile(r_ref_vec, 10)
+        r_max = np.ceil(r_min + 2*cell_thickness)
+
         # define bounds
         grid_res = 25
         # r_grid = np.linspace(np.min(r_ref), np.max(r_ref), grid_res)
         phi_grid = np.linspace(np.min(p_ref), np.max(p_ref), grid_res)
         theta_grid = np.linspace(np.min(t_ref), np.max(t_ref), grid_res)
-        
+
         theta_res = np.abs(theta_grid[1]-theta_grid[0]) / 2
         phi_res = np.abs(phi_grid[1]-phi_grid[0]) / 2
-        
+
 
         label_index = np.unique(label_image)
         rad_max_vec = np.ones((len(label_index),))*r_max
@@ -133,8 +144,8 @@ def perform_mask_qc(root, project_name, prob_thresh=-8, cell_thickness=20, min_c
                     rmax = rmin + cell_thickness
                     for lb in lbi:
                         rad_max_vec[lb] = np.min([rmax, rad_max_vec[lb]])
-        
-        
+
+
         rm_index_vec = []
         for lb in range(1, len(rad_max_vec)):
             sub_indices = label_vec == lb
@@ -142,16 +153,16 @@ def perform_mask_qc(root, project_name, prob_thresh=-8, cell_thickness=20, min_c
             r_vals = r_ref_vec[sub_indices]
             rm_indices = arr_indices[r_vals > rad_max_vec[lb]]
             rm_index_vec.append(rm_indices)
-        
+
         rm_index_vec = np.unique(np.concatenate(rm_index_vec))
         rm_sub_vec = np.unravel_index(rm_index_vec, prob_mask.shape)
         print("cleaning masks...")
         prob_mask_clean = prob_mask.copy().astype(int)
         prob_mask_clean[rm_sub_vec] = 0
-        
+
         label_image_clean = label(prob_mask_clean)
         prob_mask_final = prob_mask_clean.copy()
-        
+
         # remove small regions
         regions = regionprops(label_image_clean) #, ["centroid", "coords", "area"])
         area_vec = np.asarray([r["area"] for r in regions])*np.prod(pixel_res_prob)
@@ -159,10 +170,12 @@ def perform_mask_qc(root, project_name, prob_thresh=-8, cell_thickness=20, min_c
         for ind in rm_indices:
             prob_mask_final[label_image_clean == regions[ind].label] = 0
         label_image_final = label(prob_mask_final).astype(np.uint16)
-        
+
         # save
         io.imsave(save_directory + outname, label_image_final)
 
+    sphere_df_master = pd.concat(sphere_df_list, ignore_index=True)
+    sphere_df_master.to_csv(os.path.join(metadata_folder, "sphere_df.csv"), index=False)
     return {}
 # viewer = napari.view_image(raw_image)
 # viewer.add_labels(prob_mask*2)
@@ -172,7 +185,7 @@ def perform_mask_qc(root, project_name, prob_thresh=-8, cell_thickness=20, min_c
 
 
 if __name__ == '__main__':
-    root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\built_data\\"
+    root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\"
     project_name = "231016_EXP40_LCP1_UVB_300mJ_WT_Timelapse_Raw"
 
-    perform_mask_qc(root, project_name)
+    perform_mask_qc(root, project_name, min_cell_size=270)

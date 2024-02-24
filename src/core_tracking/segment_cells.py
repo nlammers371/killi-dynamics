@@ -31,7 +31,7 @@ def segment_FOV(
         do_3D: bool = True,
         anisotropy=None,
         diameter: float = 30,
-        cellprob_threshold: float = 0.0,
+        cellprob_threshold: float = -8,
         flow_threshold: float = 0.4,
         min_size=None,
         label_dtype=None,
@@ -188,7 +188,7 @@ def cellpose_segmentation(
     # get list of images
     image_list = sorted(glob.glob(raw_directory + "*.tiff"))
 
-    metadata_file_path = raw_directory + project_name + "_metadata.json"
+    metadata_file_path = raw_directory + "metadata.json"
     f = open(metadata_file_path)
 
     # returns JSON object as
@@ -196,6 +196,10 @@ def cellpose_segmentation(
     metadata = json.load(f)
 
     pixel_res_raw = np.asarray([metadata["PhysicalSizeZ"], metadata["PhysicalSizeY"], metadata["PhysicalSizeX"]])
+    metadata["ProbPhysicalSizeZ"] = pixel_res_raw[0] * ds_factor
+    metadata["ProbPhysicalSizeY"] = pixel_res_raw[1] * ds_factor
+    metadata["ProbPhysicalSizeX"] = pixel_res_raw[2] * ds_factor
+
     # anisotropy = pixel_res_raw[0] / pixel_res_raw[1]
 
     if not os.path.isdir(save_directory):
@@ -328,7 +332,7 @@ def cellpose_segmentation(
                 return_probs=return_probs
             )
 
-            if ds_factor > 1.0:
+            if False: #ds_factor > 1.0:
                 image_mask_out = resize(image_mask, dims_orig, order=0, anti_aliasing=False,
                                         preserve_range=True)
                 image_probs_out = resize(image_probs, dims_orig, order=1, preserve_range=True)
@@ -372,11 +376,11 @@ if __name__ == "__main__":
     ds_factor = 2
 
     # set path to CellPose model to use
-    pretrained_model = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\built_data\\231016_EXP40_LCP1_UVB_300mJ_WT_Timelapse_Raw\\cellpose\\models\\LCP-GFP-v6"
+    pretrained_model = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\built_data\\240219_LCP1_67hpf_to_\\cellpose\models\\LCP-Multiset-v1"
 
     # set read/write paths
     root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\"
-    project_name = "231016_EXP40_LCP1_UVB_300mJ_WT_Timelapse_Raw"
+    project_name = "240219_LCP1_67hpf_to_"
 
     cellpose_segmentation(root=root, project_name=project_name, return_probs=True, ds_factor=ds_factor,
                           pretrained_model=pretrained_model, overwrite=overwrite)

@@ -1,93 +1,138 @@
 import napari
 import os
+
+import pandas as pd
 from tqdm import tqdm
 import numpy as np
 from ultrack import MainConfig, load_config, track, to_tracks_layer, tracks_to_zarr
 import glob2 as glob
 import zarr
+from skimage.filters import gaussian
 import skimage.io as io
 from skimage.transform import resize
+from src.utilities.functions import sphereFit
+from scipy.ndimage.morphology import distance_transform_edt
+from skimage.morphology import binary_closing
 import json
+from astropy.coordinates import cartesian_to_spherical, spherical_to_cartesian
 
 # # set parameters
 root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\"
 project_name = "231016_EXP40_LCP1_UVB_300mJ_WT_Timelapse_Raw"
 image_dir = os.path.join(root, "built_data", project_name, "")
 ds_factor = 2
+snip_dim = 64
+overwrite_flag = False
+config_name = "tracking_v3.txt"
+tracking_folder = config_name.replace(".txt", "")
+tracking_folder = tracking_folder.replace(".toml", "")
 
-save_directory = os.path.join(root, "built_data", "tracking", project_name)
+print("loading track and mask info...")
+read_directory = os.path.join(root, "built_data", tracking_folder, project_name)
+save_directory = os.path.join(root, "built_data", "shape_snips", project_name)
+if not os.path.isdir(save_directory):
+    os.makedirs(save_directory)
 
-metadata_file_path = os.path.join(save_directory, "metadata.json")
+metadata_file_path = os.path.join(root, "metadata", project_name, "metadata.json")
 f = open(metadata_file_path)
 metadata = json.load(f)
 scale_vec = np.asarray([metadata["ProbPhysicalSizeZ"], metadata["ProbPhysicalSizeY"], metadata["ProbPhysicalSizeX"]])
-scale_vec_im = np.asarray([metadata["PhysicalSizeZ"], metadata["PhysicalSizeY"], metadata["PhysicalSizeX"]])
-#
-# specify time points to load
-image_list = sorted(glob.glob(image_dir + "*.tiff"))
-image_list = image_list[:10]
-n_time_points = len(image_list)
 
-time_points = np.arange(1, n_time_points + 1)
-# time_points = time_points[:50]
-# Load and resize
-print("Loading time points...")
-for t, time_point in enumerate(tqdm(time_points)):
+# make snip ref grids
+y_ref_snip, x_ref_snip = np.meshgrid(range(snip_dim),
+                                      range(snip_dim),
+                                      indexing="ij")
 
-    image_data = io.imread(image_list[t])
-    dims_orig = image_data.shape
-    dims_new = tuple(np.asarray(dims_orig) // 2)
-    data_zyx = resize(image_data, dims_new, order=1, preserve_range=True)
-    if t == 0:
-        data_tzyx = np.empty((len(time_points), data_zyx.shape[0], data_zyx.shape[1], data_zyx.shape[2]), dtype=data_zyx.dtype)
-
-    data_tzyx[t, :, :, :] = data_zyx
-
-# data_tzyx = np.load(project_path + "image_data_ds.npy")
-
-cfg = load_config(os.path.join(root, "metadata", project_name, "tracking_config.toml"))
+# load track and segment info
+cfg = load_config(os.path.join(root, "metadata", project_name, config_name))
 tracks_df, graph = to_tracks_layer(cfg)
+segments = zarr.open(os.path.join(read_directory, "segments.zarr"), mode='r')
+
+# load sphere fit info
+sphere_df = pd.read_csv(os.path.join(root, "metadata", project_name, "sphere_df.csv"))
+
+print("generating 2D cell profiles...")
+
+for t in tqdm(range(segments.shape[0])):
+
+    # iterate through label masks
+    frame_df = tracks_df.loc[tracks_df["t"] == t, :]
+    frame_arr = np.asarray(segments[t])
+    sphere_center_um = sphere_df.loc[sphere_df["t"] == t, ["Z", "Y", "X"]].to_numpy()[0]
+    sphere_center = np.divide(sphere_center_um, scale_vec)
+
+    if t == 0:
+        z_ref, y_ref, x_ref = np.meshgrid(range(frame_arr.shape[0]),
+                                          range(frame_arr.shape[1]),
+                                          range(frame_arr.shape[2]),
+                                          indexing="ij")
+
+    lb_vec = frame_arr[frame_arr > 0]
+    zyx_arr = np.concatenate((np.reshape(z_ref[frame_arr > 0], (len(lb_vec), 1)),
+                             np.reshape(y_ref[frame_arr > 0], (len(lb_vec), 1)),
+                             np.reshape(x_ref[frame_arr > 0], (len(lb_vec), 1))), axis=1)
 
 
-viewer = napari.view_image(data_tzyx, scale=tuple(scale_vec))
+    for i, ind in enumerate(frame_df.index):
+        # extrack mask info from tracks
+        track_id = frame_df.loc[ind, "track_id"]
+        centroid = frame_df.loc[ind, ["z", "y", "x"]].to_numpy()
 
-viewer.add_tracks(
-    tracks_df[["track_id", "t", "z", "y", "x"]],
-    name="tracks",
-    graph=graph,
-    scale=scale_vec,
-    translate=(0, 0, 0, 0),
-    visible=False,
-)
+        # make read/write name
+        snip_name = f'snip_track{track_id:04}_t{t:04}.jpg'
+        snip_path = os.path.join(save_directory, snip_name)
 
-# segments = tracks_to_zarr(
-#     cfg,
-#     tracks_df,
-#     store_or_path=project_path + "segments_v2.zarr",
-#     overwrite=True,
-# )
-segments = zarr.open(os.path.join(save_directory, "segments.zarr"), mode='r')
+        if (not os.path.isfile(snip_path)) | overwrite_flag:
 
-viewer.add_labels(
-    segments,
-    name="segments",
-    scale=scale_vec,
-    translate=(0, 0, 0, 0),
-).contour = 2
-print("check")
-# shape = cfg.data_config.metadata["shape"]
-# dtype = np.int32
-# chunks = large_chunk_size(shape, dtype=dtype)
-#
-# array = create_zarr(
-#             shape,
-#             dtype=dtype,
-#             store_or_path=project_path + "image_data_ds.zarr",
-#             chunks=chunks,
-#             default_store_type=zarr.TempStore,
-#             overwrite=True,
-#         )
-# nbscreenshot(viewer)
+            # get normal vctor
+            normal_vec = centroid - sphere_center
+            norm_u = normal_vec / np.sqrt(np.sum(normal_vec**2))
 
-if __name__ == '__main__':
-    napari.run()
+            # get coordinates for points within the cell
+            zyxp = zyx_arr[lb_vec == track_id, :]
+
+            # find d for perp plane
+            d = np.sum(np.multiply(norm_u, centroid))
+
+            # get scalar distances to plane
+            ds = np.sum(np.multiply(norm_u[np.newaxis, :], zyxp), axis=1) - d
+
+            # shift to plane
+            zyxp_plane = zyxp - centroid #np.multiply(ds[:, np.newaxis], np.tile(norm_u[np.newaxis, :], (len(ds), 1)))
+
+            # convert centroid to spherical
+            centroid_sph = cartesian_to_spherical(centroid[2], centroid[1], centroid[0])
+            new_point_sph = np.asarray([c.value for c in centroid_sph])
+            new_point_sph[1] = new_point_sph[1] + 0.1 # increment in phi direction
+
+            # convert back to cartesian
+            new_point_cart = spherical_to_cartesian(new_point_sph[0], new_point_sph[1], new_point_sph[2])
+            new_point = np.asarray([c.value for c in new_point_cart])
+            new_point = new_point[::-1]
+            plane_point = new_point.copy()
+            plane_point[0] = (-norm_u[1]*plane_point[1] - norm_u[2]*plane_point[2] + d) / norm_u[0]
+
+            # calculate unit vectors to define my two snip axes
+            v1 = centroid - plane_point
+            v1 = v1 / np.sqrt(np.sum(v1**2))
+            v2 = np.cross(v1, norm_u)
+            v2 = v2 / np.sqrt(np.sum(v2 ** 2))
+
+            # take dot product to convert to plane coordinates
+            c1 = np.round(np.sum(np.multiply(v1[np.newaxis], zyxp_plane), axis=1)).astype(np.uint8) + snip_dim // 2 + 1
+            c2 = np.round(np.sum(np.multiply(v2[np.newaxis], zyxp_plane), axis=1)).astype(np.uint8) + snip_dim // 2 + 1
+
+            # convert to snip
+            snip_raw = np.zeros((snip_dim, snip_dim)).astype(np.uint8)
+            snip_raw[c1, c2] = 1
+            # snip_dist = distance_transform_edt(snip_raw != 1)
+            # snip_dist[snip_dist > 1] = 1
+
+            snip = binary_closing(snip_raw)
+
+            io.imsave(snip_path, snip)
+
+
+
+
+#if __name__ == '__main__':

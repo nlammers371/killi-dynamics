@@ -13,23 +13,22 @@ from skimage import (
 )
 # from czitools import misc_tools
 # set parameters
-# root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\built_data\\""
-root = "/Users/nick/Cole Trapnell's Lab Dropbox/Nick Lammers/Nick/killi_tracker/built_data/"
-project_name = "231016_EXP40_LCP1_UVB_300mJ_WT_Timelapse_Raw"
+root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\built_data\\"
+# root = "/Users/nick/Cole Trapnell's Lab Dropbox/Nick Lammers/Nick/killi_tracker/built_data/"
+project_name = "240219_LCP1_67hpf_to_" #"231016_EXP40_LCP1_UVB_300mJ_WT_Timelapse_Raw"
 image_folder = os.path.join(root, project_name, "")
 image_list = sorted(glob.glob(os.path.join(image_folder + "*.tiff")))
-# label_folder = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\built_data\\cellpose_output_test2\\231016_EXP40_LCP1_UVB_300mJ_WT_Timelapse_Raw\\"
+label_folder = os.path.join(root, "cellpose_output", project_name, "")
 
 # label_list = sorted(glob.glob(os.path.join(label_folder + "*_labels.tif")))
-# prob_list = sorted(glob.glob(os.path.join(label_folder + "*_probs.tif")))
+prob_list = sorted(glob.glob(os.path.join(label_folder + "*_probs.tif")))
 image_ind = 0
 
 im = io.imread(image_list[image_ind])
+prob = io.imread(prob_list[image_ind])
 
 
-kernel_size = (10, 10, 10)
-
-print("performing background correction...")
+# print("performing background correction...")
 
 # background = restoration.rolling_ball(
 #     im.astype(np.float64),
@@ -39,23 +38,22 @@ print("performing background correction...")
 #     )
 # )
 
-background = skimage.filters.gaussian(im.astype(np.float64), sigma=10)
+# background = skimage.filters.gaussian(im.astype(np.float64), sigma=10)
 
 # im_rs = resize(im, (im.shape[0]//2, im.shape[1]//2, im.shape[2]//2), preserve_range=True).astype(np.uint16)
 # res = morphology.white_tophat(im_rs, footprint)
-im_c = np.divide(im.astype(np.float64), background.astype(np.float64))
-im_c2 = im.astype(np.float64) - background.astype(np.float64)
+# im_c = np.divide(im.astype(np.float64), background.astype(np.float64))
+# im_c2 = im.astype(np.float64) - background.astype(np.float64)
 
-print("Done.")
+# print("Done.")
 # lb = io.imread(label_list[image_ind])
 # pr = io.imread(prob_list[image_ind])
 # im = im / np.max(im)
 #
 
-viewer = napari.view_image(im)
-viewer.add_image(background, name="background")
-viewer.add_image(im_c, name="divide")
-viewer.add_image(im_c2, name="subtract")
+viewer = napari.view_image(im, scale=tuple([1, 1, 1]))
+viewer.add_labels(prob > -8, name="thresh", scale=tuple([2, 2, 2]))
+
 # labels = viewer.add_labels(lb, name="labels")
 
 

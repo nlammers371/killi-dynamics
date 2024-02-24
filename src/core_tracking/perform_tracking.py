@@ -13,90 +13,79 @@ from ultrack import MainConfig, load_config, track, to_tracks_layer, tracks_to_z
 import json
 import glob2 as glob
 
+def perform_tracking(root, project_name, config_name, first_i=None, overwrite_flag=True):
 
-# set path to mask files
-root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\"
-project_name = "231016_EXP40_LCP1_UVB_300mJ_WT_Timelapse_Raw"
-mask_directory = os.path.join(root, "built_data", "cleaned_cell_labels", project_name, "")
-mask_list = sorted(glob.glob(mask_directory + "*.tif"))
+    mask_directory = os.path.join(root, "built_data", "cleaned_cell_labels", project_name, "")
+    mask_list = sorted(glob.glob(mask_directory + "*.tif"))
+    if first_i is None:
+        first_i = len(mask_list)
+    mask_list = mask_list[:first_i]
 
-# make save directory
-save_directory = os.path.join(root, "built_data", "tracking", project_name, "")
-if not os.path.isdir(save_directory):
-    os.makedirs(save_directory)
+    # make save directory
+    track_dir = config_name
+    track_dir = track_dir.replace(".txt", "")
+    track_dir = track_dir.replace(".toml", "")
+    save_directory = os.path.join(root, "built_data", track_dir, project_name, "")
+    if not os.path.isdir(save_directory):
+        os.makedirs(save_directory)
 
-# load metadata
-metadata_file_path = os.path.join(mask_directory, "metadata.json")
-f = open(metadata_file_path)
-metadata = json.load(f)
+    # load metadata
+    metadata_file_path = os.path.join(mask_directory, "metadata.json")
+    f = open(metadata_file_path)
+    metadata = json.load(f)
+    scale_vec = np.asarray(
+        [metadata["ProbPhysicalSizeZ"], metadata["ProbPhysicalSizeY"], metadata["ProbPhysicalSizeX"]])
+    # mask_list = mask_list[:5]
 
-mask_list = mask_list[:50]
-# Load and resize
-print("Loading time points...")
-for m, mask_path in enumerate(tqdm(mask_list)):
+    config_path = os.path.join(root, "metadata", project_name, config_name)
+    cfg = load_config(config_path)
 
-    data_zyx = io.imread(mask_path)
-    # dims_orig = image_data.shape
-    # dims_new = np.round([dims_orig[0] / ds_factor * 2, dims_orig[1] / ds_factor, dims_orig[2] / ds_factor]).astype(int)
-    # data_zyx = resize(image_data, dims_new, order=1)
-    if m == 0:
-        data_tzyx = np.empty((len(mask_list), data_zyx.shape[0], data_zyx.shape[1], data_zyx.shape[2]), dtype=data_zyx.dtype)
+    # Load and resize
+    print("Loading time points...")
+    for m, mask_path in enumerate(tqdm(mask_list)):
 
-    data_tzyx[m, :, :, :] = data_zyx
+        data_zyx = io.imread(mask_path)
 
+        if m == 0:
+            data_tzyx = np.empty((len(mask_list), data_zyx.shape[0], data_zyx.shape[1], data_zyx.shape[2]),
+                                 dtype=data_zyx.dtype)
 
-# segment
-# start = time.time()
-# detection = np.empty(data_tzyx.shape, dtype=np.uint)
-# array_apply(
-#     data_tzyx,
-#     out_array=detection,
-#     func=detect_foreground,
-#     sigma=15.0,
-#     voxel_size=scale_vec,
-# )
-scale_vec = np.asarray([metadata["ProbPhysicalSizeZ"], metadata["ProbPhysicalSizeY"], metadata["ProbPhysicalSizeX"]])
-# boundaries = np.empty(data_tzyx.shape, dtype=np.uint)
-# array_apply(
-#     data_tzyx,
-#     out_array=boundaries,
-#     func=robust_invert,
-#     voxel_size=scale_vec,
-# )
+        data_tzyx[m, :, :, :] = data_zyx
+
+    detection, boundaries = labels_to_edges(data_tzyx)
+    detection = detection.astype(np.uint16)
+    boundaries = boundaries.astype(np.uint16)
 
 
-detection, boundaries = labels_to_edges(data_tzyx)
 
-# print("Examine segmentation in napari")
-# viewer = napari.view_image(data_tzyx, scale=tuple(scale_vec))
-# label_layer = viewer.add_labels(detection, name='segmentation', scale=tuple(scale_vec))
-# boundary_layer = viewer.add_image(boundaries, visible=False, scale=tuple(scale_vec))
-# viewer.theme = "dark"
+    # Perform tracking
+    track(
+        cfg,
+        detection=detection,
+        edges=boundaries,
+        scale=scale_vec,
+        overwrite=overwrite_flag,
+    )
 
-config_path = os.path.join(root, "metadata", project_name, "tracking_config.toml")
-cfg = load_config(config_path)
-# cfg =  MainConfig()  # or load default config
-# cfg.segmentation_config.threshold = 0.5
-# print(cfg)
+    tracks_df, graph = to_tracks_layer(cfg)
+    tracks_df.to_csv(os.path.join(save_directory + "tracks.csv"), index=False)
 
-# Perform tracking
-track(
-    cfg,
-    detection=detection,
-    edges=boundaries,
-    scale=scale_vec,
-    overwrite=True,
-)
+    segments = tracks_to_zarr(
+        cfg,
+        tracks_df,
+        store_or_path=os.path.join(save_directory, "segments.zarr"),
+        overwrite=True,
+    )
 
-tracks_df, graph = to_tracks_layer(cfg)
-tracks_df.to_csv(project_path + "tracks.csv", index=False)
+    return tracks_df, segments
 
-segments = tracks_to_zarr(
-    cfg,
-    tracks_df,
-    store_or_path=project_path + "segments.zarr",
-    overwrite=True,
-)
 
-print("Saving downsampled image data...")
-np.save(project_path + "image_data_ds.npy", data_tzyx)
+if __name__ == '__main__':
+
+    # set path to mask files
+    root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\"
+    project_name = "231016_EXP40_LCP1_UVB_300mJ_WT_Timelapse_Raw"
+
+    segments, tracks_df = perform_tracking(root, project_name, config_name="tracking_final.txt", first_i=35)
+
+
