@@ -96,8 +96,8 @@ if __name__ == '__main__':
 
     # set path to mask files
     root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\"
-    project_name = "240219_LCP1_93hpf_to_127hpf"
+    project_name = "231016_EXP40_LCP1_UVB_300mJ_WT_Timelapse_Raw"  #"240219_LCP1_93hpf_to_127hpf"
 
-    segments, tracks_df = perform_tracking(root, project_name, config_name="tracking_v1.txt", first_i=50, track_centroids=False)
+    segments, tracks_df = perform_tracking(root, project_name, config_name="tracking_v17.txt", track_centroids=False)
 
 
