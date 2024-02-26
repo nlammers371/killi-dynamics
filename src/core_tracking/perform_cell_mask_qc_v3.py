@@ -186,6 +186,6 @@ def perform_mask_qc(root, project_name, prob_thresh=-8, cell_thickness=20, min_c
 
 if __name__ == '__main__':
     root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\"
-    project_name = "231016_EXP40_LCP1_UVB_300mJ_WT_Timelapse_Raw"
+    project_name = "240219_LCP1_93hpf_to_127hpf" #"231016_EXP40_LCP1_UVB_300mJ_WT_Timelapse_Raw"
 
     perform_mask_qc(root, project_name, min_cell_size=270)

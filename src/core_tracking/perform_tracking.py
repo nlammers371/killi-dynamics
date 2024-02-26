@@ -7,13 +7,15 @@ from skimage.transform import resize
 from ultrack.imgproc.intensity import robust_invert
 from ultrack.utils import estimate_parameters_from_labels, labels_to_edges
 from ultrack.imgproc.segmentation import detect_foreground
+from skimage.measure import regionprops
+from skimage.morphology import ball, dilation
 import time
 from ultrack.utils.array import array_apply
 from ultrack import MainConfig, load_config, track, to_tracks_layer, tracks_to_zarr
 import json
 import glob2 as glob
 
-def perform_tracking(root, project_name, config_name, first_i=None, overwrite_flag=True):
+def perform_tracking(root, project_name, config_name, first_i=None, overwrite_flag=True, track_centroids=False, center_rad=2):
 
     mask_directory = os.path.join(root, "built_data", "cleaned_cell_labels", project_name, "")
     mask_list = sorted(glob.glob(mask_directory + "*.tif"))
@@ -25,12 +27,12 @@ def perform_tracking(root, project_name, config_name, first_i=None, overwrite_fl
     track_dir = config_name
     track_dir = track_dir.replace(".txt", "")
     track_dir = track_dir.replace(".toml", "")
-    save_directory = os.path.join(root, "built_data", track_dir, project_name, "")
+    save_directory = os.path.join(root, "built_data", "tracking", project_name, track_dir, "")
     if not os.path.isdir(save_directory):
         os.makedirs(save_directory)
 
     # load metadata
-    metadata_file_path = os.path.join(mask_directory, "metadata.json")
+    metadata_file_path = os.path.join(root, "metadata", project_name, "metadata.json")
     f = open(metadata_file_path)
     metadata = json.load(f)
     scale_vec = np.asarray(
@@ -50,13 +52,23 @@ def perform_tracking(root, project_name, config_name, first_i=None, overwrite_fl
             data_tzyx = np.empty((len(mask_list), data_zyx.shape[0], data_zyx.shape[1], data_zyx.shape[2]),
                                  dtype=data_zyx.dtype)
 
-        data_tzyx[m, :, :, :] = data_zyx
+
+        if track_centroids:
+            fp = ball(center_rad)
+            regions = regionprops(data_zyx)
+            new_mask_array = np.zeros(data_zyx.shape, dtype=np.uint16)
+            for region in regions:
+                centroid = np.asarray(region.centroid).astype(int)
+                new_mask_array[centroid[0], centroid[1], centroid[2]] = region.label
+
+            new_mask = dilation(new_mask_array, fp)
+            data_tzyx[m, :, :, :] = new_mask
+        else:
+            data_tzyx[m, :, :, :] = data_zyx
 
     detection, boundaries = labels_to_edges(data_tzyx)
     detection = detection.astype(np.uint16)
     boundaries = boundaries.astype(np.uint16)
-
-
 
     # Perform tracking
     track(
@@ -84,8 +96,8 @@ if __name__ == '__main__':
 
     # set path to mask files
     root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\"
-    project_name = "231016_EXP40_LCP1_UVB_300mJ_WT_Timelapse_Raw"
+    project_name = "240219_LCP1_93hpf_to_127hpf"
 
-    segments, tracks_df = perform_tracking(root, project_name, config_name="tracking_final.txt", first_i=35)
+    segments, tracks_df = perform_tracking(root, project_name, config_name="tracking_v1.txt", first_i=50, track_centroids=False)
 
 

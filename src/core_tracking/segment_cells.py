@@ -188,7 +188,7 @@ def cellpose_segmentation(
     # get list of images
     image_list = sorted(glob.glob(raw_directory + "*.tiff"))
 
-    metadata_file_path = raw_directory + "metadata.json"
+    metadata_file_path = os.path.join(root, "metadata", "metadata.json")
     f = open(metadata_file_path)
 
     # returns JSON object as
@@ -212,82 +212,86 @@ def cellpose_segmentation(
         # get time index
         t = int(im_name[-4:])
 
-        print("processing " + im_name)
-        # read the image data
-
-        data_zyx_raw = io.imread(image_path)
-
-        # data_zyx_raw = np.transpose(data_zyx_raw, (1, 0, 2))
-        # n_wells = len(imObject.scenes)
-        # well_list = imObject.scenes
-        # n_time_points = imObject.dims["T"][0]
-
-        # make sure we are not accidentally up-sampling
-        assert ds_factor >= 1.0
-
-        # extract key image attributes
-        # channel_names = imObject.channel_names  # list of channels and relevant info
-
-        # pixel_res_raw = np.asarray(imObject.physical_pixel_sizes)
-
-        anisotropy_raw = pixel_res_raw[0] / pixel_res_raw[1]
-        # Find channel index
-        # ind_channel = None
-        # for ch in range(len(channel_names)):
-        #     lbl = channel_names[ch]
-        #     if lbl == seg_channel_label:
-        #         ind_channel = ch
-
-        # if ind_channel == None:
-        #     raise Exception(f"ERROR: Specified segmentation channel ({len(seg_channel_label)}) was not found in data")
-        # well_list = well_list[28:]
-        # for well_index in tqdm(range(len(well_list))):
-        #     well_id_string = well_list[well_index]
-        #     well_num = int(well_id_string.replace("XYPos:", ""))
-        #     imObject.set_scene(well_id_string)
-        #
-        #     for t in reversed(range(n_time_points)):
-        #         # extract image
-        # data_zyx_raw = np.squeeze(imObject.get_image_data("CZYX", T=t))
-
-        # rescale data
-        dims_orig = data_zyx_raw.shape
-
-        if ds_factor > 1:
-            dims_new = np.round([dims_orig[0] / ds_factor, dims_orig[1] / ds_factor, dims_orig[2] / ds_factor]).astype(int)
-            data_zyx = resize(data_zyx_raw, dims_new, order=1, preserve_range=True).astype(np.uint16)
-            anisotropy = anisotropy_raw #* dims_new[1] / dims_orig[1]
-        else:
-            data_zyx = data_zyx_raw.copy()
-            anisotropy = anisotropy_raw
-        # Select 2D/3D behavior and set some parameters
-        do_3D = data_zyx.shape[0] > 1
-
-        # Preliminary checks on Cellpose model
-        if pretrained_model is None:
-            if model_type not in ["nuclei", "cyto2", "cyto"]:
-                raise ValueError(f"ERROR model_type={model_type} is not allowed.")
-        else:
-            if not os.path.exists(pretrained_model):
-                raise ValueError(f"{pretrained_model=} does not exist.")
-
-        # if output_label_name is None:
-        #     try:
-        #         channel_label = channel_names[ind_channel]
-        #         output_label_name = f"label_{channel_label}"
-        #     except (KeyError, IndexError):
-        #         output_label_name = f"label_{ind_channel}"
-
-        segment_flag = True
         label_name = im_name + f"_t{t:03}_labels"
         label_path = os.path.join(save_directory, label_name)
         # if (not os.path.isfile(label_path + '.tif')) | overwrite:
         #     pass
+        segment_flag = True
         if os.path.isfile(label_path + '.tif') and (overwrite == False):
             segment_flag = False
-            # print("skipping " + label_path)
 
         if segment_flag:
+            print("processing " + im_name)
+            # read the image data
+
+            data_zyx_raw = io.imread(image_path)
+
+            # data_zyx_raw = np.transpose(data_zyx_raw, (1, 0, 2))
+            # n_wells = len(imObject.scenes)
+            # well_list = imObject.scenes
+            # n_time_points = imObject.dims["T"][0]
+
+            # make sure we are not accidentally up-sampling
+            assert ds_factor >= 1.0
+
+            # extract key image attributes
+            # channel_names = imObject.channel_names  # list of channels and relevant info
+
+            # pixel_res_raw = np.asarray(imObject.physical_pixel_sizes)
+
+            anisotropy_raw = pixel_res_raw[0] / pixel_res_raw[1]
+            # Find channel index
+            # ind_channel = None
+            # for ch in range(len(channel_names)):
+            #     lbl = channel_names[ch]
+            #     if lbl == seg_channel_label:
+            #         ind_channel = ch
+
+            # if ind_channel == None:
+            #     raise Exception(f"ERROR: Specified segmentation channel ({len(seg_channel_label)}) was not found in data")
+            # well_list = well_list[28:]
+            # for well_index in tqdm(range(len(well_list))):
+            #     well_id_string = well_list[well_index]
+            #     well_num = int(well_id_string.replace("XYPos:", ""))
+            #     imObject.set_scene(well_id_string)
+            #
+            #     for t in reversed(range(n_time_points)):
+            #         # extract image
+            # data_zyx_raw = np.squeeze(imObject.get_image_data("CZYX", T=t))
+
+            # rescale data
+            dims_orig = data_zyx_raw.shape
+
+            if ds_factor > 1:
+                dims_new = np.round([dims_orig[0] / ds_factor, dims_orig[1] / ds_factor, dims_orig[2] / ds_factor]).astype(int)
+                data_zyx = resize(data_zyx_raw, dims_new, order=1, preserve_range=True).astype(np.uint16)
+                anisotropy = anisotropy_raw #* dims_new[1] / dims_orig[1]
+            else:
+                data_zyx = data_zyx_raw.copy()
+                anisotropy = anisotropy_raw
+            # Select 2D/3D behavior and set some parameters
+            do_3D = data_zyx.shape[0] > 1
+
+            # Preliminary checks on Cellpose model
+            if pretrained_model is None:
+                if model_type not in ["nuclei", "cyto2", "cyto"]:
+                    raise ValueError(f"ERROR model_type={model_type} is not allowed.")
+            else:
+                if not os.path.exists(pretrained_model):
+                    raise ValueError(f"{pretrained_model=} does not exist.")
+
+            # if output_label_name is None:
+            #     try:
+            #         channel_label = channel_names[ind_channel]
+            #         output_label_name = f"label_{channel_label}"
+            #     except (KeyError, IndexError):
+            #         output_label_name = f"label_{ind_channel}"
+
+
+
+                # print("skipping " + label_path)
+
+
 
             logging.info(
                 f"mask will have shape {data_zyx.shape} "
@@ -369,7 +373,7 @@ def cellpose_segmentation(
 
 if __name__ == "__main__":
     # sert some hyperparameters
-    overwrite = True
+    overwrite = False
     model_type = "cyto"
     output_label_name = "td-Tomato"
     seg_channel_label = "561"
@@ -380,7 +384,7 @@ if __name__ == "__main__":
 
     # set read/write paths
     root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\"
-    project_name = "240219_LCP1_67hpf_to_"
+    project_name = "240219_LCP1_93hpf_to_127hpf"
 
     cellpose_segmentation(root=root, project_name=project_name, return_probs=True, ds_factor=ds_factor,
                           pretrained_model=pretrained_model, overwrite=overwrite)
