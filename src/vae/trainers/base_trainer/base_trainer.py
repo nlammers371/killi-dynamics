@@ -6,7 +6,7 @@ from copy import deepcopy
 from typing import Any, Dict, List, Optional, Union
 import numpy as np
 import pandas as pd
-from src.functions.utilities import path_leaf
+from src.utilities.functions import path_leaf
 import torch
 import torch.distributed as dist
 import torch.optim as optim

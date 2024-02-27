@@ -1,7 +1,7 @@
 from pydantic.dataclasses import dataclass
 from ..vae import VAEConfig
 import pandas as pd
-from src.build.make_training_key import make_seq_key, get_sequential_pairs
+from src.vae.auxiliary_scripts.make_training_key import make_seq_key, get_sequential_pairs
 import os
 import numpy as np
 

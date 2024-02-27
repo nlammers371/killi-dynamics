@@ -257,12 +257,13 @@ class MetricVAE(BaseAE):
         labels = torch.zeros(logits.shape[0], dtype=torch.long).to(self.device)
 
         # Apply temperature parameter
-        logits = logits / temperature
+        logits = logits
 
         # initialize cross entropy loss
         loss_fun = torch.nn.CrossEntropyLoss()
 
         loss = loss_fun(logits, labels)
+        loss = loss / temperature
 
         return loss
 
