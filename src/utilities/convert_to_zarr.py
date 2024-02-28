@@ -30,10 +30,10 @@ def convert_tiff_to_zarr(input_folder, output_file):
 
 if __name__ == '__main__':
     # Example usage
-    root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\built_data\\cleaned_cell_labels\\"
-    project_name = "240219_LCP1_93hpf_to_127hpf" #"231016_EXP40_LCP1_UVB_300mJ_WT_Timelapse_Raw"
+    root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\built_data\\"
+    project_name = "231016_EXP40_LCP1_UVB_300mJ_WT_Timelapse_Raw" #"240219_LCP1_93hpf_to_127hpf"
     image_folder = os.path.join(root, project_name, "")
-    output_zarr_file = os.path.join(root, project_name + ".zarr")
+    output_zarr_file = os.path.join(root, "exported_image_files", project_name + ".zarr")
     if not os.path.isdir(output_zarr_file):
         os.makedirs(output_zarr_file)
 

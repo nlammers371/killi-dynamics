@@ -58,6 +58,6 @@ if __name__ == '__main__':
     root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\"
     project_name = "240219_LCP1_93hpf_to_127hpf" #"231016_EXP40_LCP1_UVB_300mJ_WT_Timelapse_Raw"  #
 
-    create_pseudo_nuclei(root, project_name, overwrite_flag=True, out_shape=(1350, 170, 412, 412))
+    create_pseudo_nuclei(root, project_name, overwrite_flag=False, out_shape=(1350, 170, 412, 412))
 
 

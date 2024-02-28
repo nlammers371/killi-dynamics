@@ -15,7 +15,7 @@ project_name = "240219_LCP1_93hpf_to_127hpf"  #"231016_EXP40_LCP1_UVB_300mJ_WT_T
 image_zarr = os.path.join(root, "built_data", "exported_image_files",  project_name + ".zarr")
 label_zarr = os.path.join(root, "built_data", "cleaned_cell_labels", project_name + ".zarr")
 ds_factor = 2
-config_name = "tracking_v1.txt"
+config_name = "tracking_cell.txt"
 tracking_folder = config_name.replace(".txt", "")
 tracking_folder = tracking_folder.replace(".toml", "")
 
@@ -26,13 +26,14 @@ f = open(metadata_file_path)
 metadata = json.load(f)
 scale_vec = np.asarray([metadata["ProbPhysicalSizeZ"], metadata["ProbPhysicalSizeY"], metadata["ProbPhysicalSizeX"]])
 scale_vec_im = np.asarray([metadata["PhysicalSizeZ"], metadata["PhysicalSizeY"], metadata["PhysicalSizeX"]])
-#
+
+
 # specify time points to load
-start_i = 0
+start_i = 1000
 
 # image_list = sorted(glob.glob(image_dir + "*.tiff"))
 # label_list = sorted(glob.glob(label_dir + "*_labels.tif"))
-stop_i = 200  #len(image_list)# 25
+stop_i = 1100 #len(image_list)# 25
 # image_list = image_list[start_i:stop_i]
 # n_time_points = len(image_list)
 
@@ -65,22 +66,22 @@ viewer = napari.view_image(data_tzyx[start_i:stop_i], scale=tuple(scale_vec_im))
 
 viewer.add_labels(label_tzyx[start_i:stop_i], scale=tuple(scale_vec), name="raw labels")
 
-cfg = load_config(os.path.join(root, "metadata", project_name, config_name))
-tracks_df, graph = to_tracks_layer(cfg)
-tracks_df_ft = tracks_df.loc[(tracks_df["t"] >= start_i) & (tracks_df["t"] < stop_i), :]
-
-
-track_index = np.unique(tracks_df_ft["track_id"])
-keys = graph.keys()
-graph_ft = {k:graph[k] for k in keys if k in track_index}
-viewer.add_tracks(
-    tracks_df[["track_id", "t", "z", "y", "x"]],
-    name="tracks",
-    graph=graph,
-    scale=tuple(scale_vec),
-    translate=(0, 0, 0, 0),
-    visible=False,
-)
+# cfg = load_config(os.path.join(root, "metadata", project_name, config_name))
+# tracks_df, graph = to_tracks_layer(cfg)
+# tracks_df_ft = tracks_df.loc[(tracks_df["t"] >= start_i) & (tracks_df["t"] < stop_i), :]
+#
+#
+# track_index = np.unique(tracks_df_ft["track_id"])
+# keys = graph.keys()
+# graph_ft = {k:graph[k] for k in keys if k in track_index}
+# viewer.add_tracks(
+#     tracks_df[["track_id", "t", "z", "y", "x"]],
+#     name="tracks",
+#     graph=graph,
+#     scale=tuple(scale_vec),
+#     translate=(0, 0, 0, 0),
+#     visible=False,
+# )
 
 segments = zarr.open(os.path.join(save_directory, "segments.zarr"), mode='r')
 
@@ -91,19 +92,6 @@ viewer.add_labels(
     translate=(0, 0, 0, 0),
 ).contour = 2
 
-# shape = cfg.data_config.metadata["shape"]
-# dtype = np.int32
-# chunks = large_chunk_size(shape, dtype=dtype)
-#
-# array = create_zarr(
-#             shape,
-#             dtype=dtype,
-#             store_or_path=project_path + "image_data_ds.zarr",
-#             chunks=chunks,
-#             default_store_type=zarr.TempStore,
-#             overwrite=True,
-#         )
-# nbscreenshot(viewer)
 
 if __name__ == '__main__':
     napari.run()

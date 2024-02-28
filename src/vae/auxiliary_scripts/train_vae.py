@@ -31,9 +31,9 @@ def train_vae(root, train_folder, tracking_model, n_epochs, model_type, input_di
             model_args[key] = value
 
     if input_dim == None:
-        input_dim = (1, 64, 64)
+        input_dim = (1, 96, 96)
 
-    train_dir = os.path.join(root, "shape_snips", train_folder, tracking_model)
+    train_dir = os.path.join(root, "shape_images", train_folder, tracking_model)
     # metadata_path = os.path.join(root, "metadata", '')
 
     if model_type == "MetricVAE":
@@ -71,7 +71,7 @@ def train_vae(root, train_folder, tracking_model, n_epochs, model_type, input_di
         model_name = model_type + f'_z{model_config.latent_dim:02}_' + f'ne{n_epochs:03}' #+ f'gamma{int(model_config.gamme):04}_' + f'temp{int(model_config.temperature):04}'
     else:
         model_name = model_type + f'_z{model_config.latent_dim:02}_' + f'ne{n_epochs:03}_' + train_suffix #+ f'gamma{int(model_config.gamma):04}_' + f'temp{int(model_config.temperature):04}'  + '_'
-    output_dir = os.path.join(root, "shape_models", tracking_model, model_name)
+    output_dir = os.path.join(root, "shape_models", train_folder, tracking_model, model_name)
     if not os.path.isdir((output_dir)):
         os.makedirs(output_dir)
 
@@ -129,18 +129,18 @@ if __name__ == "__main__":
     # Required arguments
     root = "E:\\Nick\\Dropbox (Cole Trapnell's Lab)\\Nick\\killi_tracker\\built_data\\"
     train_folder = "231016_EXP40_LCP1_UVB_300mJ_WT_Timelapse_Raw"
-    train_dir = os.path.join(root, "built_data", "shape_snips", train_folder)
+    train_dir = os.path.join(root, "built_data", "shape_images", train_folder)
     tracking_model = "tracking_v17"
-    model_type = "MetricVAE"
+    model_type = "VAE"
 
     #####################
     # Optional arguments
-    train_suffix = "shape_test"
+    train_suffix = "image_shape_test"
     temperature = 0.01
     batch_size = 64
     n_epochs = 100
     latent_dim = 10
-    n_conv_layers = 2
+    n_conv_layers = 3
     distance_metric = "euclidean"
 
     output_dir = train_vae(root, train_folder, tracking_model, train_suffix=train_suffix, model_type=model_type,
