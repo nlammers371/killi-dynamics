@@ -1,7 +1,7 @@
 import glob as glob
 from sklearn.neural_network import MLPRegressor
 from sklearn import linear_model
-from src.functions.dataset_utils import *
+from src.vae.auxiliary_scripts.dataset_utils import *
 import os
 from src.vae.models.auto_model import AutoModel
 import matplotlib.pyplot as plt
@@ -14,7 +14,7 @@ from tqdm import tqdm
 from sklearn.neural_network import MLPClassifier
 from sklearn.linear_model import LogisticRegression
 # from pythae.trainers.base_trainer_verbose import base_trainer_verbose
-from src.functions.dataset_utils import ContrastiveLearningDataset, ContrastiveLearningViewGenerator
+# from src.dataset_utils import ContrastiveLearningDataset, ContrastiveLearningViewGenerator
 from pythae.data.datasets import collate_dataset_output
 from torch.utils.data import DataLoader
 from sklearn.metrics.pairwise import cosine_similarity, euclidean_distances

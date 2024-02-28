@@ -135,7 +135,7 @@ if __name__ == "__main__":
 
     #####################
     # Optional arguments
-    train_suffix = "image_shape_test"
+    train_suffix = "image_high_contrast"
     temperature = 0.01
     batch_size = 64
     n_epochs = 100

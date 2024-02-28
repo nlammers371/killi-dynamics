@@ -7,7 +7,7 @@ import torch
 from PIL import Image
 
 
-def load_split_train_test(datadir, model_type, model_config, training_config, valid_size=.2):
+def load_split_train_test(datadir, model_type, model_config, training_config, valid_size=.2, train_frac=0.5):
     # train_transforms = transforms.Compose([transforms.Resize(224),
     #                                    transforms.ToTensor(),
     #                                    ])
@@ -127,6 +127,8 @@ def set_inputs_to_device(input_tensor, device):
 def make_dynamic_rs_transform():#im_dims):
     data_transform = transforms.Compose([
         transforms.Grayscale(num_output_channels=1),
+        transforms.RandomAffine(degrees=90, scale=tuple([1, 2.5])),
+        transforms.ColorJitter(brightness=0, contrast=tuple([4.9, 5.1]), saturation=0, hue=0),
         # transforms.Resize((im_dims[0], im_dims[1])),
         transforms.ToTensor(),
     ])
