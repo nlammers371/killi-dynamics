@@ -96,7 +96,7 @@ def assess_image_set(image_path, tracking_path, trained_model_path, out_path, n_
     #     # save
     #     io.imsave(fname=os.path.join(input_image_path, im_name), arr=img)
 
-    data_transform = make_dynamic_rs_transform()
+    data_transform = make_basic_rs_transform()
     dataset = MyCustomDataset(
             root=image_path,
             transform=data_transform,
@@ -166,7 +166,7 @@ def assess_image_set(image_path, tracking_path, trained_model_path, out_path, n_
 
         # add latent encodings
         zm_array = np.asarray(encoder_output[0].detach().cpu())
-
+        # recon_x_out = trained_model.decoder(z_out)["reconstruction"]
         for z in range(trained_model.latent_dim):
             if (trained_model.model_name == "MetricVAE") or (trained_model.model_name == "SeqVAE"):
                 if z in trained_model.nuisance_indices:
@@ -176,18 +176,15 @@ def assess_image_set(image_path, tracking_path, trained_model_path, out_path, n_
             else:
                 latent_shape_df.loc[df_ind_vec, f"z_mu_{z:02}"] = zm_array[:, z]
 
+        recon_x_out = trained_model.decoder(z_out)["reconstruction"]
+
+        # x = x.detach().cpu()
+        recon_x_out = recon_x_out.detach().cpu()
+
         for b in range(x.shape[0]):
 
             if iter_i in fig_indices:
-                recon_x_out = trained_model.decoder(z_out)["reconstruction"]
 
-                # recon_loss = F.mse_loss(
-                #     recon_x_out.reshape(recon_x_out.shape[0], -1),
-                #     x.reshape(x.shape[0], -1),
-                #     reduction="none",
-                # ).sum(dim=-1).detach().cpu()
-                # x = x.detach().cpu()
-                recon_x_out = recon_x_out.detach().cpu()
 
                 # show results with normal sampler
                 fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(10, 10))
@@ -201,12 +198,12 @@ def assess_image_set(image_path, tracking_path, trained_model_path, out_path, n_
                 plt.tight_layout(pad=0.)
 
                 plt.savefig(
-                    os.path.join(recon_fig_path, fnames[b] + '_loss.jpg'))
+                    os.path.join(recon_fig_path, fnames[b].replace(".jpg", "") + '_loss.jpg'))
                 plt.close()
 
                 # save just the recon on its own
                 int_recon_out = (np.squeeze(np.asarray(recon_x_out[b, 0, :, :]))*255).astype(np.uint8)
-                io.imsave(fname=os.path.join(image_path, fnames[b] + '_loss.jpg'), arr=int_recon_out)
+                io.imsave(fname=os.path.join(image_path, fnames[b].replace(".jpg", "") + '_loss.jpg'), arr=int_recon_out)
 
             iter_i += 1
 
@@ -223,8 +220,8 @@ if __name__ == "__main__":
 
     root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\"
     # root = "/net/trapnell/vol1/home/nlammers/projects/data/morphseq"
-    im_project_name = "231016_EXP40_LCP1_UVB_300mJ_WT_Timelapse_Raw" #"240219_LCP1_93hpf_to_127hpf"
-    im_track_name = "tracking_v17" # "tracking_cell"
+    im_project_name = "240219_LCP1_93hpf_to_127hpf"
+    im_track_name = "tracking_cell"
     image_path = os.path.join(root, "built_data", "shape_images", im_project_name)
     # image_path = os.path.join(root, "training_data", "20231106_ds", "train", "20230525")
     tracking_path = os.path.join(root, "built_data", "tracking", im_project_name, im_track_name)
@@ -236,8 +233,8 @@ if __name__ == "__main__":
     train_root = os.path.join(root, "built_data", "shape_models")
     project_name = "231016_EXP40_LCP1_UVB_300mJ_WT_Timelapse_Raw"
     tracking_name = "tracking_v17"
-    model_name = "VAE_z10_ne100_image_shape_test"
-    training_instance = "VAE_training_2024-02-27_17-04-24"
+    model_name = "VAE_z50_ne250_image_recon_loss_upweight_v2"
+    training_instance = "VAE_training_2024-02-29_14-47-14"
     model_dir = os.path.join(train_root, project_name, tracking_name, model_name, training_instance)
 
 

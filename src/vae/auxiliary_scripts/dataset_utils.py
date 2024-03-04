@@ -128,7 +128,16 @@ def make_dynamic_rs_transform():#im_dims):
     data_transform = transforms.Compose([
         transforms.Grayscale(num_output_channels=1),
         transforms.RandomAffine(degrees=90, scale=tuple([1, 2.5])),
-        transforms.ColorJitter(brightness=0, contrast=tuple([4.9, 5.1]), saturation=0, hue=0),
+        transforms.ColorJitter(brightness=0, contrast=tuple([2, 2]), saturation=0, hue=0),
+        # transforms.Resize((im_dims[0], im_dims[1])),
+        transforms.ToTensor(),
+    ])
+    return data_transform
+
+def make_basic_rs_transform():#im_dims):
+    data_transform = transforms.Compose([
+        transforms.Grayscale(num_output_channels=1),
+        transforms.ColorJitter(brightness=0, contrast=tuple([2, 2]), saturation=0, hue=0),
         # transforms.Resize((im_dims[0], im_dims[1])),
         transforms.ToTensor(),
     ])

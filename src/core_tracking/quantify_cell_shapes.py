@@ -12,106 +12,122 @@ from skimage.filters import gaussian
 import skimage.io as io
 from pyefd import elliptic_fourier_descriptors
 import skimage
+from skimage.morphology import label
 import json
+from skimage.filters import threshold_multiotsu
 from skimage.transform import resize
 from astropy.coordinates import cartesian_to_spherical, spherical_to_cartesian
 
 # # set parameters
-root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\"
-project_name = "240219_LCP1_93hpf_to_127hpf" # "231016_EXP40_LCP1_UVB_300mJ_WT_Timelapse_Raw" #
-image_dir = os.path.join(root, "built_data", project_name, "")
-snip_dim = 64
-overwrite_flag = False
-config_name = "tracking_cell.txt"
-tracking_folder = config_name.replace(".txt", "")
-tracking_folder = tracking_folder.replace(".toml", "")
-n_shape_coeffs = 10
 
-tracking_directory = os.path.join(root, "built_data", "tracking", project_name, tracking_folder)
-snip_directory = os.path.join(root, "built_data", "shape_snips", project_name, tracking_folder, "class0", "")
-im_directory = os.path.join(root, "built_data", "shape_images", project_name, tracking_folder, "class0", "")
 
-# load metadata
-metadata_file_path = os.path.join(root, "metadata", project_name, "metadata.json")
-f = open(metadata_file_path)
-metadata = json.load(f)
-scale_vec = np.asarray([metadata["ProbPhysicalSizeZ"], metadata["ProbPhysicalSizeY"], metadata["ProbPhysicalSizeX"]])
+def extract_cell_shape_stats(root, project_name, config_name, refined_snip_flag=False):
 
-# make snip ref grids
-y_ref_snip, x_ref_snip = np.meshgrid(range(snip_dim),
-                                      range(snip_dim),
-                                      indexing="ij")
+    tracking_folder = config_name.replace(".txt", "")
+    tracking_folder = tracking_folder.replace(".toml", "")
+    n_shape_coeffs = 10
 
-# load track and segment info
-cfg = load_config(os.path.join(root, "metadata", project_name, config_name))
-tracks_df, graph = to_tracks_layer(cfg)
-segments = zarr.open(os.path.join(tracking_directory, "segments.zarr"), mode='r')
+    tracking_directory = os.path.join(root, "built_data", "tracking", project_name, tracking_folder)
 
-# load sphere fit info
-# sphere_df = pd.read_csv(os.path.join(root, "metadata", project_name, "sphere_df.csv"))
+    if refined_snip_flag:
+        snip_directory = os.path.join(root, "built_data", "shape_snips_refined", project_name, tracking_folder, "class0", "")
+    else:
+        snip_directory = os.path.join(root, "built_data", "shape_snips", project_name, tracking_folder, "class0", "")
+    im_directory = os.path.join(root, "built_data", "shape_images", project_name, tracking_folder, "class0", "")
 
-print("loading cell shape masks...")
-track_index = np.unique(tracks_df["track_id"])
-# coeff_cols = []
-# for n in range(n_shape_coeffs):
-#     for c in range(4):
-#         coeff_string = "coeff_" + f'row{n:02}_' + f'col{c:01}'
-#         coeff_cols.append(coeff_string)
-        
-# coeff_cols = coeff_cols[3:]
-df_list = []
-for _, track_id in enumerate(tqdm(track_index)):
+    # load metadata
+    # metadata_file_path = os.path.join(root, "metadata", project_name, "metadata.json")
+    # f = open(metadata_file_path)
+    # metadata = json.load(f)
+    # scale_vec = np.asarray([metadata["ProbPhysicalSizeZ"], metadata["ProbPhysicalSizeY"], metadata["ProbPhysicalSizeX"]])
+    #
+    # # make snip ref grids
+    # y_ref_snip, x_ref_snip = np.meshgrid(range(snip_dim),
+    #                                       range(snip_dim),
+    #                                       indexing="ij")
 
-    # iterate through label masks
-    cell_df = tracks_df.loc[tracks_df["track_id"] == track_id, ["track_id", "t"]].copy()
-    
-    for i, ind in enumerate(cell_df.index):
-        # extrack mask info from tracks
-        time_id = cell_df.loc[ind, "t"]
-        # centroid = frame_df.loc[ind, ["z", "y", "x"]].to_numpy()
+    # load track and segment info
+    cfg = load_config(os.path.join(root, "metadata", project_name, config_name))
+    tracks_df, graph = to_tracks_layer(cfg)
+    # segments = zarr.open(os.path.join(tracking_directory, "segments.zarr"), mode='r')
 
-        # make read/write name
-        snip_name = f'snip_track{track_id:04}_t{time_id:04}.jpg'
-        snip_path = os.path.join(snip_directory, snip_name)
+    # load sphere fit info
+    # sphere_df = pd.read_csv(os.path.join(root, "metadata", project_name, "sphere_df.csv"))
 
-        im_name = f'im_track{track_id:04}_t{time_id:04}.jpg'
-        im_path = os.path.join(im_directory, im_name)
+    print("loading cell shape masks...")
+    track_index = np.unique(tracks_df["track_id"])
+    coeff_cols = []
+    for n in range(n_shape_coeffs):
+        for c in range(4):
+            coeff_string = "coeff_" + f'row{n:02}_' + f'col{c:01}'
+            coeff_cols.append(coeff_string)
 
-        # load cell snip
-        snip = io.imread(snip_path)
-        im = io.imread(im_path)
+    # coeff_cols = coeff_cols[3:]
+    df_list = []
+    for _, track_id in enumerate([5]):#tqdm(track_index)):
 
-        # get shape descriptor
-        snip_bin = snip > 50
-        # contour = skimage.measure.find_contours(snip_bin, 0.5)
+        # iterate through label masks
+        cell_df = tracks_df.loc[tracks_df["track_id"] == track_id, ["track_id", "t"]].copy()
 
-        # get shape coefficients
-        # coeffs = elliptic_fourier_descriptors(contour[0], order=10, normalize=False)
+        for i, ind in enumerate(cell_df.index):
+            # extrack mask info from tracks
+            time_id = cell_df.loc[ind, "t"]
+            # centroid = frame_df.loc[ind, ["z", "y", "x"]].to_numpy()
 
-        # out = coeffs.flatten()
-        # cell_df.loc[ind, coeff_cols] = out
+            # make read/write name
+            snip_name = f'snip_track{track_id:04}_t{time_id:04}.jpg'
+            snip_path = os.path.join(snip_directory, snip_name)
 
-        # calculate more traditional metrics
-        # perimeter = skimage.measure.perimeter_crofton(snip_bin)
-        rg = regionprops(snip_bin.astype(int))
-        cell_df.loc[ind, "complexity"] = rg[0].perimeter / (np.pi * rg[0].equivalent_diameter_area)
-        cell_df.loc[ind, "area"] = rg[0].area
-        cell_df.loc[ind, "solidity"] = rg[0].solidity
-        try:
-            cell_df.loc[ind, "eccentricity"] = rg[0].axis_major_length / rg[0].axis_minor_length
-        except:
-            cell_df.loc[ind, "eccentricity"] = np.nan
+            im_name = f'im_track{track_id:04}_t{time_id:04}.jpg'
+            im_path = os.path.join(im_directory, im_name)
 
-        im_rs = resize(np.pad(im, 16), snip.shape, preserve_range=True)
-        cell_df.loc[ind, "lcp_intensity"] = np.mean(im_rs[snip > 50])
-        # cell_df.loc[ind, "intertia_tensor"] = [rg[0].inertia_tensor]
-        # cell_df.loc[ind, "intertia_eigs"] = rg[0].inertia_tensor_eigvals
-        cell_df.loc[ind, "circularity"] = rg[0].area / (rg[0].axis_major_length**2*np.pi / 4)
+            # load cell snip
+            snip = io.imread(snip_path)
+            im = io.imread(im_path)
 
-        im_rs = resize
-    df_list.append(cell_df)
-        
-shape_df = pd.concat(df_list, axis=0, ignore_index=True)
-shape_df = shape_df.drop_duplicates(subset=["track_id", "t"])
-shape_df.to_csv(os.path.join(tracking_directory, "cell_shape_df.csv"), index=False)
-#if__name__ == '__main__':
+            # get shape descriptor
+            snip_bin = snip > 50
+            contour = skimage.measure.find_contours(snip_bin, 0.5)
+
+            # get shape coefficients
+            coeffs = elliptic_fourier_descriptors(contour[0], order=10, normalize=False)
+            out = coeffs.flatten()
+            cell_df.loc[ind, coeff_cols] = out
+
+            # calculate more traditional metrics
+            # perimeter = skimage.measure.perimeter_crofton(snip_bin)
+            rg = regionprops(snip_bin.astype(int))
+            cell_df.loc[ind, "perimeter"] = rg[0].perimeter
+            cell_df.loc[ind, "complexity"] = rg[0].perimeter / (np.pi * rg[0].equivalent_diameter_area)
+            cell_df.loc[ind, "area"] = rg[0].area
+            cell_df.loc[ind, "solidity"] = rg[0].solidity
+            try:
+                cell_df.loc[ind, "eccentricity"] = rg[0].axis_major_length / rg[0].axis_minor_length
+            except:
+                cell_df.loc[ind, "eccentricity"] = np.nan
+
+            im_rs = resize(np.pad(im, 16), snip.shape, preserve_range=True)
+            cell_df.loc[ind, "lcp_intensity"] = np.mean(im_rs[snip > 50])
+            # cell_df.loc[ind, "intertia_tensor"] = [rg[0].inertia_tensor]
+            # cell_df.loc[ind, "intertia_eigs"] = rg[0].inertia_tensor_eigvals
+            cell_df.loc[ind, "circularity"] = rg[0].area / (rg[0].axis_major_length**2*np.pi / 4)
+
+            if time_id == 273:
+                print("check")
+
+        df_list.append(cell_df)
+
+    shape_df = pd.concat(df_list, axis=0, ignore_index=True)
+    shape_df = shape_df.drop_duplicates(subset=["track_id", "t"])
+    if refined_snip_flag:
+        shape_df.to_csv(os.path.join(tracking_directory, "cell_shape_df_refined.csv"), index=False)
+    else:
+        shape_df.to_csv(os.path.join(tracking_directory, "cell_shape_df.csv"), index=False)
+
+if __name__ == '__main__':
+    root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\"
+    project_name = "240219_LCP1_93hpf_to_127hpf"  # "231016_EXP40_LCP1_UVB_300mJ_WT_Timelapse_Raw" #
+    overwrite_flag = True
+    config_name = "tracking_cell.txt"
+
+    extract_cell_shape_stats(root, project_name, config_name, refined_snip_flag=True)

@@ -135,12 +135,12 @@ if __name__ == "__main__":
 
     #####################
     # Optional arguments
-    train_suffix = "image_high_contrast"
+    train_suffix = "image_recon_loss_upweight_v2"
     temperature = 0.01
     batch_size = 64
-    n_epochs = 100
-    latent_dim = 10
-    n_conv_layers = 3
+    n_epochs = 250
+    latent_dim = 50
+    n_conv_layers = 5
     distance_metric = "euclidean"
 
     output_dir = train_vae(root, train_folder, tracking_model, train_suffix=train_suffix, model_type=model_type,
