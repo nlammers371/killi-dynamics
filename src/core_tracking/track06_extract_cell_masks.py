@@ -86,7 +86,7 @@ def mask_iterator(t, raw_masks, segments, raw_data, sphere_df, tracks_df, scale_
             # convert centroid to spherical
             centroid_sph = cartesian_to_spherical(centroid[2], centroid[1], centroid[0])
             new_point_sph = np.asarray([c.value for c in centroid_sph])
-            new_point_sph[1] = new_point_sph[1] + 0.1 # increment in phi direction
+            new_point_sph[1] = new_point_sph[1] + 0.1  # increment in phi direction
 
             # convert back to cartesian
             new_point_cart = spherical_to_cartesian(new_point_sph[0], new_point_sph[1], new_point_sph[2])
@@ -173,8 +173,8 @@ def extract_cell_masks(root, project_name, config_name, par_flag=False, overwrit
 
     print("loading track and mask info...")
     read_directory = os.path.join(root, "built_data", "tracking", project_name, tracking_folder)
-    save_directory = os.path.join(root, "built_data", "shape_snips",  project_name, tracking_folder, "class0")
-    im_directory = os.path.join(root, "built_data", "shape_images", project_name, tracking_folder, "class0")
+    save_directory = os.path.join(root, "built_data", "shape_snips_or",  project_name, tracking_folder, "class0")
+    im_directory = os.path.join(root, "built_data", "shape_images_or", project_name, tracking_folder, "class0")
     if not os.path.isdir(save_directory):
         os.makedirs(save_directory)
     if not os.path.isdir(im_directory):
