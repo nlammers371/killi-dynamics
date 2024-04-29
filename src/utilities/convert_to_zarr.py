@@ -17,7 +17,7 @@ def convert_tiff_to_zarr(input_folder, output_file):
     dtype = sample_tiff.dtype
 
     # Create Zarr array
-    z = zarr.open(output_file, mode='w', shape=(len(tiff_files),) + shape, dtype=dtype, chunks=(1,) + shape)
+    z = zarr.open(output_file, mode='a', shape=(len(tiff_files),) + shape, dtype=dtype, chunks=(1,) + shape)
 
     # Iterate over TIFF files, read them, and store in Zarr array
     for i, tiff_file in enumerate(tqdm(tiff_files)):

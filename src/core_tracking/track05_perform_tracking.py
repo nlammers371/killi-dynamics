@@ -16,10 +16,8 @@ from ultrack import MainConfig, load_config, track, to_tracks_layer, tracks_to_z
 import json
 import glob2 as glob
 
-def perform_tracking(root, project_name, config_name, first_i=None, overwrite_flag=True, track_centroids=False, last_i=None):
-
-    # mask_list = sorted(glob.glob(mask_directory + "*.tif"))
-
+def perform_tracking(root, project_name, config_name, model_name, first_i=None, overwrite_flag=True,
+                     stitched_lb_flag=True, track_centroids=False, last_i=None):
 
     # make save directory
     track_dir = config_name
@@ -35,19 +33,20 @@ def perform_tracking(root, project_name, config_name, first_i=None, overwrite_fl
     metadata = json.load(f)
     scale_vec = np.asarray(
         [metadata["ProbPhysicalSizeZ"], metadata["ProbPhysicalSizeY"], metadata["ProbPhysicalSizeX"]])
-    # mask_list = mask_list[:5]
 
     config_path = os.path.join(root, "metadata", project_name, config_name)
     cfg = load_config(config_path)
 
     # Load and resize
     print("Loading time points...")
-    if track_centroids:
+    if stitched_lb_flag:
+        mask_path = os.path.join(root, "built_data", "stitched_labels", model_name, project_name + "_labels_stitched.zarr")
+    elif track_centroids:
         print("Using cell centroids")
         mask_path = os.path.join(root, "built_data", "cleaned_cell_labels", project_name + "_centroids.zarr")
     else:
         mask_path = os.path.join(root, "built_data", "cleaned_cell_labels", project_name + ".zarr")
-    mask_data = zarr.open(mask_path)
+    mask_data = zarr.open(mask_path, mode="r")
 
     if first_i is None:
         first_i = 0
@@ -106,9 +105,12 @@ if __name__ == '__main__':
 
     # set path to mask files
     root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\"
-    project_name = "240219_LCP1_93hpf_to_127hpf" #"231016_EXP40_LCP1_UVB_300mJ_WT_Timelapse_Raw"  #
+    project_name = "230425_EXP21_LCP1_D6_1pm_DextranStabWound"
+    model_name = "LCP-Multiset-v1"
+    tracking_config = "tracking_jordao.txt"
 
-    segments, tracks_df = perform_tracking(root, project_name, config_name="tracking_cell_strict_frontier.txt", track_centroids=False)
+    segments, tracks_df = perform_tracking(root, project_name, config_name=tracking_config, model_name=model_name,
+                                           last_i=80)
                                            # first_i=1000, last_i=1050, track_centroids=False)
 
 
