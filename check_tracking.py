@@ -15,7 +15,7 @@ project_name = "230425_EXP21_LCP1_D6_1pm_DextranStabWound"
 image_zarr = os.path.join(root, "built_data", "zarr_image_files",  project_name + ".zarr")
 # label_zarr = os.path.join(root, "built_data", "cleaned_cell_labels", project_name + ".zarr")
 ds_factor = 1
-config_name = "tracking_jordao.txt"
+config_name = "tracking_jordao_full.txt"
 tracking_folder = config_name.replace(".txt", "")
 tracking_folder = tracking_folder.replace(".toml", "")
 
@@ -25,13 +25,13 @@ metadata_file_path = os.path.join(root, "metadata", project_name, "metadata.json
 f = open(metadata_file_path)
 metadata = json.load(f)
 scale_vec_im = np.asarray([metadata["PhysicalSizeZ"], metadata["PhysicalSizeY"], metadata["PhysicalSizeX"]])
-scale_vec = np.asarray([metadata["ProbPhysicalSizeZ"], metadata["ProbPhysicalSizeY"], metadata["ProbPhysicalSizeX"]])
+scale_vec = scale_vec_im # np.asarray([metadata["ProbPhysicalSizeZ"], metadata["ProbPhysicalSizeY"], metadata["ProbPhysicalSizeX"]])
 
 
 
 # specify time points to load
 start_i = 0
-stop_i = 80
+stop_i = 119
 
 
 data_tzyx = zarr.open(image_zarr, mode='r')

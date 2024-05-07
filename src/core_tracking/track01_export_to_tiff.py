@@ -14,7 +14,7 @@ import dask
 # def create_dummy_data(shape):
 #     return da.random.random(shape, chunks=(100, 100, 100))
 
-def initialize_zarr_store(zarr_path, image_list):
+def initialize_zarr_store(zarr_path, image_list, overwrite_flag=False):
 
     # im_raw_sample = io.imread(image_list[0])
     # Load image
@@ -30,7 +30,10 @@ def initialize_zarr_store(zarr_path, image_list):
     shape = tuple(dims_new)
     dtype = np.uint16
 
-    zarr_file = zarr.open(zarr_path, mode='w', shape=(len(image_list),) + shape, dtype=dtype, chunks=(1,) + shape)
+    if overwrite_flag:
+        zarr_file = zarr.open(zarr_path, mode='w', shape=(len(image_list),) + shape, dtype=dtype, chunks=(1,) + shape)
+    else:
+        zarr_file = zarr.open(zarr_path, mode='a', shape=(len(image_list),) + shape, dtype=dtype, chunks=(1,) + shape)
 
     return zarr_file
 
@@ -132,7 +135,7 @@ def export_czi_to_zarr(raw_data_root, file_prefix, project_name, save_root, tres
     if resampling_scale is None:
         resampling_scale = np.asarray([1.5, 1.5, 1.5])
 
-    zarr_path = os.path.join(save_root, "built_data", "exported_image_files", project_name + '2.zarr')
+    zarr_path = os.path.join(save_root, "built_data", "zarr_image_files", project_name + '.zarr')
 
     if not os.path.isdir(zarr_path):
         os.makedirs(zarr_path)
@@ -149,10 +152,10 @@ def export_czi_to_zarr(raw_data_root, file_prefix, project_name, save_root, tres
     # open first image file to get stats
 
     # Resize
-    zarr_file = initialize_zarr_store(zarr_path, image_list)
+    zarr_file = initialize_zarr_store(zarr_path, image_list, overwrite_flag)
 
     # Specify time index and pixel resolution
-    print("Exporting image arrays...")
+    # print("Exporting image arrays...")
     if par_flag:
         process_map(
             partial(write_zarr, zarr_file=zarr_file, image_list=image_list,
@@ -161,7 +164,7 @@ def export_czi_to_zarr(raw_data_root, file_prefix, project_name, save_root, tres
                                  metadata_only_flag=metadata_only_flag),
                     range(len(image_list)), max_workers=n_workers)
     else:
-        for i in tqdm(range(len([image_list[0]]))):
+        for i in tqdm(range(len(image_list)), "Exporting raw images to zarr..."):
             write_zarr(i, zarr_file=zarr_file, image_list=image_list,
                                  overwrite_flag=overwrite_flag, metadata_file_path=metadata_file_path,
                                  file_prefix=file_prefix, tres=tres, resampling_scale=resampling_scale,
@@ -193,5 +196,6 @@ if __name__ == "__main__":
     # Specify the path to the output OME-Zarr file and metadata file
     save_root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\"
     project_name = "230425_EXP21_LCP1_D6_1pm_DextranStabWound"
-    overwrite=True
-    export_czi_to_zarr(raw_data_root, file_prefix, project_name, save_root, tres, par_flag=False, overwrite_flag=True)
+    overwrite = True
+    export_czi_to_zarr(raw_data_root, file_prefix, project_name, save_root, tres,
+                       par_flag=False, overwrite_flag=overwrite)

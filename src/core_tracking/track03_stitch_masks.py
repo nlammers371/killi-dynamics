@@ -75,7 +75,6 @@ def do_affinity_stitching(prob_array, grad_array, scale_vec, max_prob=12, min_pr
 
     ######
     # performing hierarchical watershed
-
     # initialize
     masks_curr = seg_hypothesis_array[0]  # start with the most permissive mask
     if do_hierarchy:
@@ -194,13 +193,16 @@ def stitch_cellpose_labels(root, model_name, project_name, overwrite=False):
     if overwrite | (not prev_flag):
         write_indices = np.arange(n_time_points)
     else:
-        n_from = prob_zarr.nchunks_initialized
-        n_to = s_mask_zarr.nchunks_initialized
-        write_indices = np.arange(n_to, n_from)
+        write_indices = []
+        for t in tqdm(range(n_time_points), "Checking which frames to segment..."):
+            nz_flag_to = np.any(s_mask_zarr[t, :, :, :] != 0)
+            if not nz_flag_to:  # if the cellpose output is all zeros
+                nz_flag_from = np.any(prob_zarr[t, :, :, :] != 0)
+                if nz_flag_from:  # guard against edge case where cellpose output was initialized but not filled
+                    write_indices.append(t)
 
     # iterate through time points
-    print("Stitching labels...")
-    for time_int in [80]:#tqdm(write_indices):
+    for time_int in tqdm(write_indices, "Stitching labels..."):
 
         # use affinity graph method from omnipose core to stitch masks at different probability levels
         # do the stitching
@@ -221,7 +223,7 @@ def stitch_cellpose_labels(root, model_name, project_name, overwrite=False):
 
 
 if __name__ == "__main__":
-    overwrite = True
+    overwrite = False
     xy_ds_factor = 1
     cell_diameter = 20
     cellprob_threshold = 16.0

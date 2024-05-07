@@ -218,7 +218,7 @@ def cellpose_segmentation(
         write_indices = []
         for t in tqdm(range(n_time_points), "Checking which frames to segment..."):
             nz_flag_to = np.any(prob_zarr[t, :, :, :] != 0)
-            if not nz_flag_to:
+            if not nz_flag_to:     # if the cellpose output is all zeros
                 nz_flag_from = np.any(data_tzyx[t, :, :, :] != 0)
                 if nz_flag_from:  # guard against edge case where cellpose output was initialized but not filled
                     write_indices.append(t)

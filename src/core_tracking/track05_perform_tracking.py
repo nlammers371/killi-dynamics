@@ -32,7 +32,7 @@ def perform_tracking(root, project_name, config_name, model_name, first_i=None, 
     f = open(metadata_file_path)
     metadata = json.load(f)
     scale_vec = np.asarray(
-        [metadata["ProbPhysicalSizeZ"], metadata["ProbPhysicalSizeY"], metadata["ProbPhysicalSizeX"]])
+        [metadata["PhysicalSizeZ"], metadata["PhysicalSizeY"], metadata["PhysicalSizeX"]])
 
     config_path = os.path.join(root, "metadata", project_name, config_name)
     cfg = load_config(config_path)
@@ -107,10 +107,8 @@ if __name__ == '__main__':
     root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\"
     project_name = "230425_EXP21_LCP1_D6_1pm_DextranStabWound"
     model_name = "LCP-Multiset-v1"
-    tracking_config = "tracking_jordao.txt"
+    tracking_config = "tracking_jordao_full.txt"
 
     segments, tracks_df = perform_tracking(root, project_name, config_name=tracking_config, model_name=model_name,
-                                           last_i=80)
+                                           last_i=None)
                                            # first_i=1000, last_i=1050, track_centroids=False)
-
-
