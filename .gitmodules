@@ -1,0 +1,3 @@
+[submodule "src/nucleus_dynamics"]
+	path = src/nucleus_dynamics
+	url = https://github.com/nlammers371/nucleus_dynamics.git
