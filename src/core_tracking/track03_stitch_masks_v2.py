@@ -1,5 +1,6 @@
 import os
 import zarr
+from src.utilities.image_utils import remove_background
 from src.utilities.functions import path_leaf
 import numpy as np
 from omnipose.core import compute_masks
@@ -13,12 +14,16 @@ import pandas as pd
 import glob2 as glob
 
 
-def restitch_masks(mask_stack_zarr_path, prob_zarr_path, thresh_range, min_mask_size=15):
+def restitch_masks(mask_stack_zarr_path, prob_zarr_path, thresh_range, rm_background=True, min_mask_size=15):
     # open the zarr file
     mask_stack_zarr = zarr.open(mask_stack_zarr_path, mode="a")
     mask_aff_zarr_path = mask_stack_zarr_path.replace("stacks.zarr", "aff.zarr")
     mask_aff_zarr = zarr.open(mask_aff_zarr_path, mode="r+")
     prob_zarr = zarr.open(prob_zarr_path, mode="r")
+
+    if rm_background:
+        prob_zarr = remove_background(prob_zarr)
+
     prob_levels = mask_stack_zarr.attrs["prob_levels"]
     if len(prob_levels) == 0:
         prob_levels = dict({})
@@ -138,9 +143,13 @@ def do_affinity_stitching(prob_array, grad_array, scale_vec, seg_res=None, prob_
 
     print("Resizing arrays...")
     zoom_factor = np.divide(shape_iso, shape_orig)
-    grad_array_rs = zoom(grad_array, (1,) + tuple(zoom_factor), order=1) * rs_factor
-    prob_array_rs = zoom(prob_array, zoom_factor,
-                         order=1)  # resize(prob_array, shape_iso, preserve_range=True, order=1)
+    if np.any(zoom_factor != 1):
+        grad_array_rs = zoom(grad_array, (1,) + tuple(zoom_factor), order=1) * rs_factor
+        prob_array_rs = zoom(prob_array, zoom_factor, order=1)
+    else:
+        grad_array_rs = grad_array.copy()
+        prob_array_rs = prob_array.copy()
+    # resize(prob_array, shape_iso, preserve_range=True, order=1)
 
     grad_array_rs[0] = grad_array_rs[0]
     # list of prob thresholds to use
@@ -239,11 +248,17 @@ def do_affinity_stitching(prob_array, grad_array, scale_vec, seg_res=None, prob_
         masks_curr = wt_array
 
     # resize
-    masks_out_rs = zoom(masks_curr, zoom_factor ** -1, order=0)
+    if np.any(zoom_factor != 1):
+        masks_out_rs = zoom(masks_curr, zoom_factor ** -1, order=0)
+    else:
+        masks_out_rs = masks_curr.copy()
     masks_out_rs = morphology.remove_small_objects(masks_out_rs, min_mask_size)
 
     # resize each hypothesis
-    seg_hypothesis_array_rs = zoom(seg_hypothesis_array, (1,) + tuple(zoom_factor ** -1), order=0)
+    if np.any(zoom_factor != 1):
+        seg_hypothesis_array_rs = zoom(seg_hypothesis_array, (1,) + tuple(zoom_factor ** -1), order=0)
+    else:
+        seg_hypothesis_array_rs = seg_hypothesis_array.copy()
 
     return masks_out_rs, seg_hypothesis_array_rs
 
@@ -254,7 +269,7 @@ def stitch_cellpose_labels(root, model_name, experiment_date, well_range=None, p
         prob_thresh_range = np.arange(-8, 9, 4)
 
     if seg_res is None:
-        seg_res = 0.65
+        seg_res = 1.5
 
     # get raw data dir
     raw_directory = os.path.join(root, "built_data", "zarr_image_files", experiment_date, '')
@@ -291,16 +306,16 @@ def stitch_cellpose_labels(root, model_name, experiment_date, well_range=None, p
         #########
         file_prefix = path_leaf(well).replace("_probs.zarr", "")
         print("Stitching data from " + file_prefix)
-        raw_name = os.path.join(raw_directory, file_prefix + ".zarr")
+        raw_name = os.path.join(raw_directory, raw_directory[:-1] + ".zarr")
         prob_name = os.path.join(cellpose_directory, file_prefix + "_probs.zarr")
         grad_name = os.path.join(cellpose_directory, file_prefix + "_grads.zarr")
 
         prob_zarr = zarr.open(prob_name, mode="a")
         grad_zarr = zarr.open(grad_name, mode="a")
-        if (experiment_date == "20240425") or (experiment_date == "20240424"):
-            data_zarr = zarr.open(raw_name, mode="r")
-        else:
-            data_zarr = prob_zarr
+        # if (experiment_date == "20240425") or (experiment_date == "20240424"):
+        data_zarr = zarr.open(raw_name, mode="r")
+        # else:
+        #     data_zarr = prob_zarr
 
         time_indices0 = np.arange(prob_zarr.shape[0])
 
@@ -309,9 +324,16 @@ def stitch_cellpose_labels(root, model_name, experiment_date, well_range=None, p
         aff_mask_zarr_path = os.path.join(out_directory, file_prefix + "_mask_aff.zarr")
         prev_flag = os.path.isdir(multi_mask_zarr_path)
 
+        if len(prob_thresh_range.shape)==2:
+            n_probs = prob_thresh_range.shape[1]
+        elif len(prob_thresh_range.shape)==1:
+            n_probs = prob_thresh_range.shape[0]
+        else:
+            raise Exception("Incorrect dimensions for prob thresh input.")
+
         # initialize zarr file to save mask hierarchy
         multi_mask_zarr = zarr.open(multi_mask_zarr_path, mode='a',
-                                    shape=(prob_zarr.shape[0],) + (len(prob_thresh_range),) + tuple(
+                                    shape=(prob_zarr.shape[0],) + (n_probs,) + tuple(
                                         prob_zarr.shape[1:]),
                                     dtype=np.uint16, chunks=(1, 1,) + prob_zarr.shape[1:])
 
@@ -326,7 +348,7 @@ def stitch_cellpose_labels(root, model_name, experiment_date, well_range=None, p
         for meta_key in meta_keys:
             multi_mask_zarr.attrs[meta_key] = data_zarr.attrs[meta_key]
             aff_mask_zarr.attrs[meta_key] = data_zarr.attrs[meta_key]
-            if "voxel_size_um" not in prob_keys:
+            if 'PhysicalSizeX' not in prob_keys:
                 prob_zarr.attrs[meta_key] = data_zarr.attrs[meta_key]
                 grad_zarr.attrs[meta_key] = data_zarr.attrs[meta_key]
 
@@ -337,7 +359,7 @@ def stitch_cellpose_labels(root, model_name, experiment_date, well_range=None, p
             prob_zarr.attrs["model_path"] = model_name
             grad_zarr.attrs["model_path"] = model_name
 
-        scale_vec = data_zarr.attrs["voxel_size_um"]
+        scale_vec = np.asarray([data_zarr.attrs['PhysicalSizeZ'], data_zarr.attrs['PhysicalSizeY'], data_zarr.attrs['PhysicalSizeX']])
 
         # determine which indices to stitch
         print("Determining which time points need stitching...")
@@ -353,17 +375,21 @@ def stitch_cellpose_labels(root, model_name, experiment_date, well_range=None, p
 
         # iterate through time points
         print("Stitching labels...")
-        for time_int in tqdm(write_indices):
+        for time_int in tqdm([2157]):#write_indices):
 
             # use affinity graph method from omnipose core to stitch masks at different probability levels
             # do the stitching
             grad_array = grad_zarr[time_int, :, :, :, :]
             prob_array = prob_zarr[time_int, :, :, :]
 
+            if len(prob_thresh_range.shape) == 1:
+                prob_thresh_vec = prob_thresh_range
+            else:
+                prob_thresh_vec = prob_thresh_range[time_int, :]
             if np.any(prob_array != 0):
                 # perform stitching
                 stitched_labels, mask_stack = do_affinity_stitching(prob_array, grad_array, scale_vec=scale_vec,
-                                                                    prob_thresh_range=prob_thresh_range,
+                                                                    prob_thresh_range=prob_thresh_vec,
                                                                     seg_res=seg_res)  # NL: these were used for 202404 min_prob=-2, max_prob=8,
 
                 # save
@@ -371,11 +397,11 @@ def stitch_cellpose_labels(root, model_name, experiment_date, well_range=None, p
                 aff_mask_zarr[time_int] = stitched_labels
 
                 mms = multi_mask_zarr.attrs["prob_levels"]
-                mms[int(time_int)] = list(prob_thresh_range)
+                mms[int(time_int)] = list(prob_thresh_vec)
                 multi_mask_zarr.attrs["prob_levels"] = mms
 
                 ams = aff_mask_zarr.attrs["prob_levels"]
-                ams[int(time_int)] = list(prob_thresh_range)
+                ams[int(time_int)] = list(prob_thresh_vec)
                 aff_mask_zarr.attrs["prob_levels"] = ams
                 # aff_mask_zarr.attrs["prob_levels"][time_int] = prob_thresh_range
             else:
@@ -383,10 +409,19 @@ def stitch_cellpose_labels(root, model_name, experiment_date, well_range=None, p
 
 
 if __name__ == "__main__":
-    # root = "E:\\Nick\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\pecfin_dynamics\\"
-    root = "/media/nick/hdd02/Cole Trapnell's Lab Dropbox/Nick Lammers/Nick/pecfin_dynamics/"
-    experiment_date = "20240223"
-    model_name = "log-v5"
-    overwrite = False
+    root = "E:\\Nick\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\killi_tracker\\"
+    # root = "/media/nick/hdd02/Cole Trapnell's Lab Dropbox/Nick Lammers/Nick/pecfin_dynamics/"
+    model_name = "LCP-Multiset-v1"
+    experiment_date = "20240611_NLS-Kikume_24hpf_side2"
+    overwrite = True
+    nframes = 2158
+    # make dynamic thresholds
+    first_range = np.arange(-2.5, 6.5, 4)
+    last_range = np.arange(1, 6, 2)
+    lb_vec = np.linspace(first_range[0], last_range[0], nframes)
+    md_vec = np.linspace(first_range[1], last_range[1], nframes)
+    ub_vec = np.linspace(first_range[2], last_range[2], nframes)
+    prob_range_array = np.c_[lb_vec[:, np.newaxis], md_vec[:, np.newaxis], ub_vec[:, np.newaxis]]
 
-    stitch_cellpose_labels(root, model_name, experiment_date, overwrite)
+    stitch_cellpose_labels(root=root, model_name=model_name, experiment_date=experiment_date,
+                           prob_thresh_range=prob_range_array, overwrite=True, well_range=None)

@@ -53,27 +53,7 @@ def perform_tracking(root, project_name, config_name, model_name, first_i=None, 
     if last_i is None:
         last_i = mask_data.shape[0]
     mask_data = mask_data[first_i:last_i]
-    # for m, mask_path in enumerate(tqdm(mask_list)):
-    #
-    #     data_zyx = io.imread(mask_path)
-    #
-    #     if m == 0:
-    #         mask_data = np.empty((len(mask_list), data_zyx.shape[0], data_zyx.shape[1], data_zyx.shape[2]),
-    #                              dtype=data_zyx.dtype)
-    #
-    #
-    #     if track_centroids:
-    #         fp = ball(center_rad)
-    #         regions = regionprops(data_zyx)
-    #         new_mask_array = np.zeros(data_zyx.shape, dtype=np.uint16)
-    #         for region in regions:
-    #             centroid = np.asarray(region.centroid).astype(int)
-    #             new_mask_array[centroid[0], centroid[1], centroid[2]] = region.label
-    #
-    #         new_mask = dilation(new_mask_array, fp)
-    #         mask_data[m, :, :, :] = new_mask
-    #     else:
-    #         mask_data[m, :, :, :] = data_zyx
+
 
     detection, boundaries = labels_to_edges(mask_data)
     detection = detection.astype(np.uint16)

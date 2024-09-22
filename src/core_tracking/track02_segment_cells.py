@@ -7,9 +7,6 @@ import logging
 import glob2 as glob
 import os
 import time
-import SimpleITK as sitk
-# import pyclesperanto as cle
-import skimage as ski
 from typing import Any
 from typing import Dict
 from typing import Literal
@@ -18,7 +15,6 @@ import numpy as np
 from cellpose import models
 from cellpose.core import use_gpu
 from skimage.transform import resize
-import json
 from src.utilities.functions import path_leaf
 import zarr
 from src.utilities.image_utils import calculate_LoG
@@ -168,18 +164,18 @@ def cellpose_segmentation(
     im_name = path_leaf(zarr_path)
     print("processing " + im_name)
     # read the image data
-    data_tzyx = zarr.open(zarr_path, mode="r")
+    data_tzyx = zarr.open(zarr_path, mode="a")
     # n_wells = len(imObject.scenes)
     # well_list = imObject.scenes
     n_time_points = data_tzyx.shape[0]
 
     # load metadata
-    metadata_file_path = os.path.join(root, "metadata", project_name, "metadata.json")
-    f = open(metadata_file_path)
+    # metadata_file_path = os.path.join(root, "metadata", project_name, "metadata.json")
+    # f = open(metadata_file_path)
 
     # returns JSON object as
     # a dictionary
-    metadata = json.load(f)
+    metadata = data_tzyx.attrs #json.load(f)
 
     pixel_res_raw = np.asarray([metadata["PhysicalSizeZ"], metadata["PhysicalSizeY"], metadata["PhysicalSizeX"]])
     metadata["ProbPhysicalSizeZ"] = pixel_res_raw[0] * ds_factor
@@ -223,6 +219,7 @@ def cellpose_segmentation(
                 if nz_flag_from:  # guard against edge case where cellpose output was initialized but not filled
                     write_indices.append(t)
 
+    # write_indices = range(1447, 2180)
     for t in tqdm(write_indices):
         # extract image
         data_zyx_raw = data_tzyx[t]
@@ -316,13 +313,15 @@ def cellpose_segmentation(
 
 if __name__ == "__main__":
     # s0rt some hyperparameters
-    overwrite = False
+    overwrite = True
     xy_ds_factor = 1
     cell_diameter = 20
     cellprob_threshold = 0
-    project_name = "230425_EXP21_LCP1_D6_1pm_DextranStabWound"
+    project_name = "20240611_NLS-Kikume_24hpf_side2"
     # set path to CellPose model to use
     # pretrained_model = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\pecfin_dynamics\\fin_morphodynamics\\built_data\\cellpose_training\\20240223_tdTom\\log\\models\\log-v5"
+    # pretrained_model = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\built_data\\cellpose\\training_snips\\20240611_NLS-Kikume_24hpf_side2\\models\\kikume-v2"
+    # pretrained_model = "Y:\\data\\pecfin_dynamics\\built_data\\cellpose_training\\standard_models\\tdTom-bright-log-v5" #
     pretrained_model = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\built_data\\cellpose_models\\LCP-Multiset-v1"
     # set read/write paths
     root = "E:\\Nick\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\"
