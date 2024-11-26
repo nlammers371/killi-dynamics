@@ -20,7 +20,7 @@ config_name = "tracking_jordao_full.txt"
 tracking_folder = config_name.replace(".txt", "")
 tracking_folder = tracking_folder.replace(".toml", "")
 
-save_directory = os.path.join(root, "built_data", "tracking", project_name, tracking_folder)
+save_directory = os.path.join(root, "tracking", project_name, tracking_folder, "well0000", "")
 
 metadata_file_path = os.path.join(root, "metadata", project_name, "metadata.json")
 f = open(metadata_file_path)
@@ -44,7 +44,7 @@ viewer = napari.view_image(data_tzyx[start_i:stop_i], scale=tuple(scale_vec_im))
 # viewer.add_labels(label_tzyx[start_i:stop_i], scale=tuple(scale_vec), name="raw labels")
 
 cfg = load_config(os.path.join(root, "metadata", project_name, config_name))
-_, graph = to_tracks_layer(cfg)
+# _, graph = to_tracks_layer(cfg)
 tracks_df = pd.read_csv(os.path.join(root, "metadata", project_name, "tracks_df_dist.csv"))
 tracks_df["dist_binary"] = 1*(tracks_df["distance"] <= 250)
 
