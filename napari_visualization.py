@@ -1,9 +1,6 @@
 import napari
 import os
 from aicsimageio import AICSImage
-import czitools
-from czitools import read_tools
-from czitools import napari_tools
 import numpy as np
 from tqdm import tqdm
 from skimage.transform import resize

@@ -12,7 +12,7 @@ from tqdm import tqdm
 # # set parameters
 # root = "/media/nick/hdd02/Cole Trapnell's Lab Dropbox/Nick Lammers/Nick/pecfin_dynamics/"
 root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\"
-experiment_date = "20240611_NLS-Kikume_24hpf_side2" #"230425_EXP21_LCP1_D6_1pm_DextranStabWound" #
+experiment_date = "20240611_NLS-Kikume_24hpf_side1" #"230425_EXP21_LCP1_D6_1pm_DextranStabWound" #
 config_name = "tracking_jordao_20240918.txt" #"tracking_jordao_full" #
 model ="LCP-Multiset-v1"
 tracking_folder = config_name.replace(".txt", "")
@@ -34,6 +34,8 @@ project_sub_path = os.path.join(project_path, f"track_{start_i:04}" + f"_{stop_i
 
 # path to image data
 data_path = os.path.join(root, "built_data", "cellpose_output", model, experiment_date, "")
+raw_data_path = os.path.join(root, "built_data", "zarr_image_files", experiment_date, "")
+
 if not killi_flag:
     filename = experiment_date + f"_well{well_num:04}_probs.zarr"
 else:
@@ -45,8 +47,10 @@ if experiment_date == "230425_EXP21_LCP1_D6_1pm_DextranStabWound":
     project_sub_path = project_path
 
 # load tracking results
-image_path = os.path.join(data_path, filename)
+image_path = os.path.join(raw_data_path[:-1] + ".zarr")
 label_path = os.path.join(project_sub_path, "segments.zarr")
+
+
 data_zarr = zarr.open(image_path, mode='r')
 
 scale_vec = tuple([1.5, 1.5, 1.5]) #data_zarr.attrs["voxel_size_um"])
@@ -61,8 +65,10 @@ df_list = []
 for t in tqdm(range(start_i, stop_i)):
     nz_ids = seg_zarr[t] > 0
     id_vec = seg_zarr[t][nz_ids]
+    f_vec = data_zarr[t][nz_ids]
     df_temp = pd.DataFrame([t]*len(id_vec), columns=["t"])
     df_temp["track_id"] = id_vec
+    df_temp["fluo"] = f_vec
     df_list.append(df_temp)
 
 nucleus_df = pd.concat(df_list, axis=0, ignore_index=True)
@@ -70,7 +76,7 @@ nucleus_df = pd.concat(df_list, axis=0, ignore_index=True)
 size_df = nucleus_df.groupby(["time", "nucleus_id"]).size().rename("Volume").reset_index()
 
 tracks_df = tracks_df.merge(size_df, how="left", on=["track_id", "t"], indicator=False)
-tracks_df.to_csv(os.path.join(project_sub_path, "tracks_size.csv"), index=False)
+# tracks_df.to_csv(os.path.join(project_sub_path, "tracks_size.csv"), index=False)
 #
 # time_index = np.unique(size_df["time"])
 #
@@ -102,7 +108,7 @@ tracks_df.to_csv(os.path.join(project_sub_path, "tracks_size.csv"), index=False)
 #     seg_lb[t][np.isin(seg_zarr[time], g_ids3)] = 3
 #     seg_lb[t][np.isin(seg_zarr[time], g_ids4)] = 4
 #
-# viewer = napari.Viewer(ndisplay=3) #view_image(data_zarr_da, scale=tuple(scale_vec))
+viewer = napari.Viewer(ndisplay=3) #view_image(data_zarr_da, scale=tuple(scale_vec))
 # viewer.add_tracks(
 #     tracks_df[["track_id", "t", "z", "y", "x"]],
 #     name="tracks",
@@ -112,20 +118,20 @@ tracks_df.to_csv(os.path.join(project_sub_path, "tracks_size.csv"), index=False)
 # )
 # viewer.scale_bar.visible = True
 # viewer.scale_bar.unit = "um"
-
-# viewer.add_image(
-#     prob_short,
-#     name="probs",
-#     scale=tuple(scale_vec),
-#     translate=(0, 0, 0, 0),
-# ).contour = 2
+time_ind = 1000
+viewer.add_image(
+    data_zarr[time_ind:time_ind+3],
+    name="probs",
+    scale=tuple(scale_vec),
+    # translate=(0, 0, 0, 0),
+).contour = 2
 #
-# viewer.add_labels(
-#     seg_zarr[t_min:t_max],
-#     name="segments",
-#     scale=tuple(scale_vec),
-#     translate=(0, 0, 0, 0),
-# ).contour = 2
+viewer.add_labels(
+    seg_zarr[time_ind:time_ind+3],
+    name="segments",
+    scale=tuple(scale_vec),
+    translate=(0, 0, 0, 0),
+).contour = 2
 #
 # viewer.add_labels(
 #     seg_lb,
