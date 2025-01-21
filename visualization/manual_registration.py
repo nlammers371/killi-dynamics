@@ -61,10 +61,10 @@ if __name__ == '__main__':
                        image_data1.attrs['PhysicalSizeY'],
                        image_data1.attrs['PhysicalSizeX']])
 
-    thresh = 11400
+    # thresh = 11400
 
     # pull frame
-    frame_i = 0
+    frame_i = 200
     channel_i = 1
 
     data_zyx1 = np.squeeze(image_data1[frame_i, channel_i])
@@ -120,8 +120,37 @@ if __name__ == '__main__':
 
 
     viewer = napari.Viewer(ndisplay=3)
-    viewer.add_image(data_full1, scale=scale_vec, opacity=0.7, colormap="gray", contrast_limits=[250, 2000])
-    viewer.add_image(data_full2_shift, scale=scale_vec, opacity=0.7, colormap="cyan", contrast_limits=[250, 2500])
+    viewer.add_image(data_full1, scale=scale_vec, opacity=0.7, colormap="gray", contrast_limits=[350, 1200])
+    viewer.add_image(data_full2_shift, scale=scale_vec, opacity=0.7, colormap="cyan", contrast_limits=[250, 2000])
+    # viewer.camera.angles = (0, 0, 0)
+    viewer.window.add_plugin_dock_widget(plugin_name='napari-animation')
+    viewer.layers[0].blending = 'translucent'
+    viewer.layers[1].blending = 'translucent'
+
+    from napari_animation import Animation
+
+    # Create an Animation object linked to the viewer
+    animation = Animation(viewer)
+    # Create an Animation object linked to the viewer
+    # Number of frames in the movie
+    n_frames = 30
+    # viewer.camera.angles = (0, 0, 0)  # Reset angles to a consistent starting point
+
+    # Add the first keyframe
+    animation.capture_keyframe()
+    zangle_init = viewer.camera.angles[1]
+    # Rotate the camera and capture frames
+    for i in range(1, n_frames + 1):
+        angle = 360 * (i / n_frames)  # Compute the angle
+        viewer.camera.angles = (viewer.camera.angles[0], zangle_init + angle, viewer.camera.angles[2])
+        animation.capture_keyframe()
+
+    # Export the animation with interpolation
+    # animation.animate("embryo_rotation.mp4", fps=30)
+
+    # Save the animation to a file
+    save_path = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\tracking\\20240611_NLS-Kikume_24hpf_side2\\tracking_jordao_20240918\\well0000\\track_0000_1600\\figures\\"
+    animation.animate(save_path + "embryo_rotation2.mp4", fps=32)
     # viewer.add_labels(im_label, scale=scale_vec)
     #
     # # load zarr image file

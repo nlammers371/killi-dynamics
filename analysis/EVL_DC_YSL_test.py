@@ -3,7 +3,7 @@ import os
 import pandas as pd
 from tqdm import tqdm
 import numpy as np
-from ultrack import MainConfig, load_config, track, to_tracks_layer, tracks_to_zarr
+# from ultrack import MainConfig, load_config, track, to_tracks_layer, tracks_to_zarr
 import glob2 as glob
 import zarr
 import dask.array as da
@@ -12,7 +12,7 @@ from tqdm import tqdm
 # # set parameters
 # root = "/media/nick/hdd02/Cole Trapnell's Lab Dropbox/Nick Lammers/Nick/pecfin_dynamics/"
 root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\"
-experiment_date = "20240611_NLS-Kikume_24hpf_side1" #"230425_EXP21_LCP1_D6_1pm_DextranStabWound" #
+experiment_date = "20240611_NLS-Kikume_24hpf_side2" #"230425_EXP21_LCP1_D6_1pm_DextranStabWound" #
 config_name = "tracking_jordao_20240918.txt" #"tracking_jordao_full" #
 model ="LCP-Multiset-v1"
 tracking_folder = config_name.replace(".txt", "")
@@ -47,7 +47,8 @@ if experiment_date == "230425_EXP21_LCP1_D6_1pm_DextranStabWound":
     project_sub_path = project_path
 
 # load tracking results
-image_path = os.path.join(raw_data_path[:-1] + ".zarr")
+# image_path = os.path.join(raw_data_path[:-1] + ".zarr")
+image_path = os.path.join(data_path, filename)
 label_path = os.path.join(project_sub_path, "segments.zarr")
 
 
@@ -109,30 +110,14 @@ tracks_df = tracks_df.merge(size_df, how="left", on=["track_id", "t"], indicator
 #     seg_lb[t][np.isin(seg_zarr[time], g_ids4)] = 4
 #
 viewer = napari.Viewer(ndisplay=3) #view_image(data_zarr_da, scale=tuple(scale_vec))
-# viewer.add_tracks(
-#     tracks_df[["track_id", "t", "z", "y", "x"]],
-#     name="tracks",
-#     scale=tuple(scale_vec),
-#     translate=(0, 0, 0, 0),
-#     visible=False,
-# )
-# viewer.scale_bar.visible = True
-# viewer.scale_bar.unit = "um"
-time_ind = 1000
+
 viewer.add_image(
-    data_zarr[time_ind:time_ind+3],
+    image_data[0],
     name="probs",
     scale=tuple(scale_vec),
     # translate=(0, 0, 0, 0),
 ).contour = 2
-#
-viewer.add_labels(
-    seg_zarr[time_ind:time_ind+3],
-    name="segments",
-    scale=tuple(scale_vec),
-    translate=(0, 0, 0, 0),
-).contour = 2
-#
+
 # viewer.add_labels(
 #     seg_lb,
 #     name="segments-thresh",
