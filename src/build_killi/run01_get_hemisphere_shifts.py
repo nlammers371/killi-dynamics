@@ -4,7 +4,7 @@ import zarr
 import scipy.ndimage as ndi
 import os
 from skimage.registration import phase_cross_correlation
-from scipy.ndimage import rotate
+# from scipy.ndimage import rotate
 from tqdm import tqdm
 import pandas as pd
 from tqdm.contrib.concurrent import process_map

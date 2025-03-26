@@ -22,8 +22,8 @@ zarr1 = zarr.open(zpath1, mode="r")
 zarr2 = zarr.open(zpath2, mode="r")
 
 # generate frame indices
-t_start = 650
-t_stop = 652
+t_start = 550
+t_stop = 552
 nucleus_channel = 1
 frames = np.arange(t_start, t_stop)
 
@@ -65,14 +65,9 @@ for t, time in enumerate(tqdm(range(t_start, t_start+1), "Applying shifts")):
 
     data_zyx1 = np.squeeze(im1[t, nucleus_channel])
     data_zyx2 = np.squeeze(im2[t, nucleus_channel])
-    #
-    # # experiment with manual alignment
+
+    # experiment with manual alignment
     data_zyx2_i = data_zyx2[::-1, :, ::-1]
-    # i1a = zdim2_orig # - z_align_size
-    # i1b = zdim2_orig + z_align_size
-    #
-    # i2a = zdim2_orig - z_align_size
-    # i2b = zdim2_orig #i1b #- overlap_guess
 
     # ALIGN
     align1 = data_zyx1[:z_align_size, :, :]
@@ -111,8 +106,9 @@ viewer = napari.Viewer()
 # viewer.add_image(align2, scale=scale_vec,  colormap="cyan", contrast_limits=[0, 2500])
 # viewer.add_image(align2_shifted, scale=scale_vec,  colormap="cyan", contrast_limits=[0, 2500])
 viewer.add_image(data_full1, scale=scale_vec,  colormap="gray", contrast_limits=[0, 2500])
-viewer.add_image(data_full2, scale=scale_vec, colormap="cyan", contrast_limits=[0, 2500])
+# viewer.add_image(im1, scale=scale_vec, channel_axis=1)#,  contrast_limits=[0, 2500])
+# viewer.add_image(data_full2, scale=scale_vec, colormap="cyan", contrast_limits=[0, 2500])
 viewer.add_image(data_full2_shift, scale=scale_vec,  colormap="magma", contrast_limits=[0, 2500])
 
 napari.run()
-print("wtf")
+

@@ -1,4 +1,4 @@
-from src.build_killi.segment_nuclei import segment_nuclei
+from src.build_killi.run02_segment_nuclei import segment_nuclei
 
 
 if __name__ == '__main__':

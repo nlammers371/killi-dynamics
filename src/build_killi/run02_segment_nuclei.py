@@ -9,11 +9,111 @@ from skimage import filters
 from skimage import morphology
 from tqdm import tqdm
 import pandas as pd
+from functools import partial
 from skimage.segmentation import watershed
 from scipy.interpolate import interp1d
-import concurrent.futures
+from tqdm.contrib.concurrent import process_map
+from func_timeout import func_timeout, FunctionTimedOut
+import statsmodels.api as sm
 
-def calculate_LoG(image, LoG_sigma=1, gauss_sigma=None, thresh_li=None):
+def calculate_li_trend(root, project_prefix, first_i=0, last_i=None, multiside_experiment=True):
+
+    if not multiside_experiment:
+        li_df = pd.read_csv(os.path.join(root, "built_data", "mask_stacks", project_prefix + "_li_df.csv"))
+    else:
+        li_df_raw1 = pd.read_csv(os.path.join(root, "built_data", "mask_stacks", project_prefix + "_side1_li_df.csv"))
+        li_df_raw2 = pd.read_csv(os.path.join(root, "built_data", "mask_stacks", project_prefix + "_side2_li_df.csv"))
+        li_df = pd.concat([li_df_raw1, li_df_raw2], axis=0, ignore_index=True)
+
+    # get last index if not provided
+    if last_i is None:
+        if not multiside_experiment:
+            zarr_path = os.path.join(root, "built_data", "zarr_image_files", project_prefix + ".zarr")
+        else:
+            zarr_path = os.path.join(root, "built_data", "zarr_image_files", project_prefix + "_side1.zarr")
+        im_zarr = zarr.open(zarr_path, mode="r")
+        last_i = im_zarr.shape[0]
+
+    # get raw estimates
+    x = li_df["frame"].to_numpy()
+    y = li_df["li_thresh"].to_numpy()
+
+    # set lower bound for 'reasonable' threshold. The estimator sometimes produces infeasibly low values
+    y_thresh = np.percentile(y, 95) / 10
+
+    # filter
+    outlier_filter = y > y_thresh
+    x = x[outlier_filter]
+    y = y[outlier_filter]
+    si = np.argsort(x)
+    x = x[si]
+    y = y[si]
+
+    # perform smoothing
+    lowess_result = sm.nonparametric.lowess(y, x, frac=0.3, it=3)
+    x_lowess = lowess_result[:, 0]
+    y_lowess = lowess_result[:, 1]
+
+    # interpolate/extrapolate to get full trend
+    frames_full = np.arange(first_i, last_i)
+    thresh_interp = interp1d(x_lowess, y_lowess, kind="linear", fill_value="extrapolate")
+    thresh_predictions = thresh_interp(frames_full)
+
+    # generate li table
+    li_df_full = pd.DataFrame(frames_full, columns=["frame"])
+    li_df_full["li_thresh"] = thresh_predictions
+    if not multiside_experiment:
+        li_df_full.to_csv(os.path.join(root, "built_data", "mask_stacks", project_prefix + "_li_thresh_trend.csv"), index=False)
+    else:
+        li_df_full.to_csv(os.path.join(root, "built_data", "mask_stacks", project_prefix + "side1_li_thresh_trend.csv"),
+                          index=False)
+        li_df_full.to_csv(os.path.join(root, "built_data", "mask_stacks", project_prefix + "side2_li_thresh_trend.csv"),
+                          index=False)
+
+    return li_df_full
+
+def perform_li_segmentation(time_int, li_df, image_zarr, nuclear_channel, multichannel_flag, stack_zarr, aff_zarr, n_thresh=5):
+
+    li_thresh = li_df.loc[time_int, "li_thresh"]
+    # do the stitching
+    if multichannel_flag:
+        image_array = np.squeeze(image_zarr[time_int, nuclear_channel, :, :, :])
+    else:
+        image_array = np.squeeze(image_zarr[time_int, :, :, :])
+
+    if np.any(image_array != 0):
+
+        data_log_i, thresh_li = calculate_li_thresh(image_array, thresh_li=li_thresh)
+
+        thresh_range = np.linspace(thresh_li * 0.75, 1.25 * thresh_li, n_thresh)
+
+        # perform stitching
+        aff_mask, mask_stack = do_hierarchical_watershed(data_log_i, thresh_range=thresh_range)
+
+        # save
+        stack_zarr[time_int] = mask_stack
+        aff_zarr[time_int] = aff_mask
+
+        mms = stack_zarr.attrs["thresh_levels"]
+        mms[int(time_int)] = list(thresh_range)
+        mms_str_keys = {str(k): v for k, v in mms.items()}
+        stack_zarr.attrs["thresh_levels"] = mms_str_keys
+
+        ams = aff_zarr.attrs["thresh_levels"]
+        ams[int(time_int)] = list(thresh_range)
+        ams_str_keys = {str(k): v for k, v in ams.items()}
+        aff_zarr.attrs["thresh_levels"] = ams_str_keys
+
+        seg_flag = 1
+
+    else:
+        print(f"Skipping time point {time_int:04}: empty image found")
+        seg_flag = 0
+
+    return seg_flag
+
+
+def calculate_li_thresh(image, LoG_sigma=1, gauss_sigma=None, thresh_li=None):
     
     if gauss_sigma is None:
         gauss_sigma = (1.33, 4, 4)
@@ -41,7 +141,7 @@ def do_hierarchical_watershed(im_log, thresh_range, min_mask_size=15):
     # initialize
     masks_curr = mask_stack[0, :, :, :]  # start with the most permissive mask
 
-    for m in tqdm(range(1, len(thresh_range)), "Performing hierarchical stitching..."):
+    for m in range(1, len(thresh_range)):  # tqdm(range(1, len(thresh_range)), "Performing hierarchical stitching..."):
 
         # get next layer of labels
         aff_labels = mask_stack[m, :, :, :]
@@ -112,7 +212,7 @@ def do_hierarchical_watershed(im_log, thresh_range, min_mask_size=15):
     return masks_out, mask_stack
 
 
-def segment_nuclei(root, project_name, nuclear_channel=None, n_thresh=5, overwrite=False, last_i=None):
+def segment_nuclei(root, project_name, nuclear_channel=None, n_workers=8, par_flag=False, n_thresh=5, overwrite=False, last_i=None):
 
     # get raw data dir
     zarr_path = os.path.join(root, "built_data", "zarr_image_files", project_name + ".zarr")
@@ -122,7 +222,7 @@ def segment_nuclei(root, project_name, nuclear_channel=None, n_thresh=5, overwri
     os.makedirs(out_directory, exist_ok=True)
 
     # load LI thresh DF
-    li_df = pd.read_csv(out_directory + project_name + "_li_df.csv")
+    li_df = pd.read_csv(out_directory + project_name + "_li_thresh_trend.csv")
 
     #########
     print("Stitching data from " + project_name)
@@ -138,7 +238,6 @@ def segment_nuclei(root, project_name, nuclear_channel=None, n_thresh=5, overwri
             
     if last_i is None:
         last_i = image_zarr.shape[0]
-    write_indices = np.arange(last_i)
 
     # generate zarr store for stitched masks
     multi_mask_zarr_path = os.path.join(out_directory, project_name + "_mask_stacks.zarr")
@@ -158,6 +257,23 @@ def segment_nuclei(root, project_name, nuclear_channel=None, n_thresh=5, overwri
     aff_zarr = zarr.open(aff_mask_zarr_path, mode='a', shape=(image_zarr.shape[0],) + dim_shape,
                               dtype=np.uint16, chunks=(1,) + dim_shape)
 
+    # get all indices
+    all_indices = set(range(last_i))
+
+    # List files directly within zarr directory (recursive search):
+    existing_chunks = os.listdir(aff_mask_zarr_path)
+
+    # Extract time indices from chunk filenames:
+    written_indices = set(int(fname.split('.')[0])
+                          for fname in existing_chunks if fname[0].isdigit())
+
+    empty_indices = np.asarray(sorted(all_indices - written_indices))
+
+    if overwrite:
+        write_indices = np.asarray(list(all_indices))
+    else:
+        write_indices = empty_indices
+
     # transfer metadata from raw data to cellpose products
     meta_keys = image_zarr.attrs.keys()
 
@@ -173,42 +289,24 @@ def segment_nuclei(root, project_name, nuclear_channel=None, n_thresh=5, overwri
     #                    image_zarr.attrs['PhysicalSizeX']])
 
     # iterate through time points
-    for time_int in tqdm(write_indices, "Segmenting frames..."):
+    li_thresh_call = partial(perform_li_segmentation, li_df=li_df, image_zarr=image_zarr, nuclear_channel=nuclear_channel,
+                             multichannel_flag=multichannel_flag, stack_zarr=stack_zarr, aff_zarr=aff_zarr, n_thresh=n_thresh)
 
-        li_thresh = li_df.loc[time_int, "li_thresh"]
-        # do the stitching
-        if multichannel_flag:
-            image_array = np.squeeze(image_zarr[time_int, nuclear_channel, :, :, :])
-        else:
-            image_array = np.squeeze(image_zarr[time_int, :, :, :])
-            
-        if np.any(image_array != 0):
-            
-            # take LoG
-            print("Calculating LoG and estimating LI threshold")
-            data_log_i, thresh_li = calculate_LoG(image_array, thresh_li=li_thresh)
+    if par_flag:
+        print("Conducting segmentation in parallel...")
+        seg_flags = process_map(li_thresh_call, write_indices, max_workers=n_workers, chunksize=1)
+    else:
+        seg_flags = []
+        print("Conducting segmentation serially...")
+        for time_int in tqdm(write_indices):
+            seg_flag = li_thresh_call(time_int=time_int)
+            seg_flags.append(seg_flag)
 
-            thresh_range = np.linspace(thresh_li * 0.75, 1.25 * thresh_li, n_thresh)
-            
-            # perform stitching
-            aff_mask, mask_stack = do_hierarchical_watershed(data_log_i, thresh_range=thresh_range)
+    return seg_flags
 
-            # save
-            stack_zarr[time_int] = mask_stack
-            aff_zarr[time_int] = aff_mask
 
-            mms = stack_zarr.attrs["thresh_levels"]
-            mms[int(time_int)] = list(thresh_range)
-            stack_zarr.attrs["thresh_levels"] = mms
 
-            ams = aff_zarr.attrs["thresh_levels"]
-            ams[int(time_int)] = list(thresh_range)
-            aff_zarr.attrs["thresh_levels"] = ams
-
-        else:
-            print(f"Skipping time point {time_int:04}: no cellpose output found")
-
-def estimate_li_thresh(root, project_name, interval=125, nuclear_channel=None, last_i=None, timeout=60*6):
+def estimate_li_thresh(root, project_name, interval=125, nuclear_channel=None, start_i=0, last_i=None, timeout=60*6):
     # get raw data dir
     zarr_path = os.path.join(root, "built_data", "zarr_image_files", project_name + ".zarr")
 
@@ -232,35 +330,30 @@ def estimate_li_thresh(root, project_name, interval=125, nuclear_channel=None, l
     if last_i is None:
         last_i = image_zarr.shape[0]
 
-    thresh_frames = np.arange(0, last_i, interval)
+    thresh_frames = np.arange(start_i, last_i, interval)
     thresh_frames[-1] = last_i - 1
 
     li_vec = []
     frame_vec = []
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        futures = {}  # Keep track of submitted futures
+    for time_int in tqdm(thresh_frames, "Estimating Li thresholds..."):
+        if multichannel_flag:
+            image_array = np.squeeze(image_zarr[time_int, nuclear_channel, :, :, :]).copy()
+        else:
+            image_array = np.squeeze(image_zarr[time_int, :, :, :]).copy()
+        try:
+            # Runs calculate_li_thresh(image_array) with a timeout (in seconds)
+            result = func_timeout(timeout, calculate_li_thresh, args=(image_array,))
+            # Unpack the result as needed, for example:
+            _, li_thresh = result
+            li_vec.append(li_thresh)
+            frame_vec.append(time_int)
+            print(time_int)
+            print(li_thresh)
+        except FunctionTimedOut:
+            print(f"Function timed out for time: {time_int}")
+            pass
 
-        for time_int in tqdm(thresh_frames, "Estimating thresholds..."):
-            if multichannel_flag:
-                image_array = np.squeeze(image_zarr[time_int, nuclear_channel, :, :, :])
-            else:
-                image_array = np.squeeze(image_zarr[time_int, :, :, :])
 
-            # Submit the task
-            future = executor.submit(calculate_LoG, image_array)
-            futures[future] = time_int  # Store future with its associated time
-
-        for future, time_int in futures.items():
-            try:
-                _, li_thresh = future.result(timeout=timeout)
-                li_vec.append(li_thresh)
-                frame_vec.append(time_int)
-                print(time_int)
-                print(li_thresh)
-            except concurrent.futures.TimeoutError:
-                print(f"Function timed out for time: {time_int}")
-
-    print("check")
     frames_full = np.arange(0, last_i)
     # li_interp = np.interp(frames_full, thresh_frames[:7], li_vec)
     # li_interpolator = interp1d(thresh_frames[:7], li_vec, kind='linear', fill_value="extrapolate")
@@ -269,17 +362,21 @@ def estimate_li_thresh(root, project_name, interval=125, nuclear_channel=None, l
     coefficients = np.polyfit(frame_vec, li_vec, deg=1)
 
     # Predict y values
-    li_interp = np.polyval(coefficients, frames_full)
+    # li_interp = np.polyval(coefficients, frames_full)
 
     # interpolate
+    li_df_raw = pd.DataFrame(frame_vec, columns=["frame"])
+    li_df_raw["li_thresh"] = li_vec
+
     # li_interp = li_interpolator(frames_full)
-    li_df = pd.DataFrame(frames_full, columns=["frame"])
-    li_df["li_thresh"] = li_interp
+    # li_df = pd.DataFrame(frames_full, columns=["frame"])
+    # li_df["li_thresh"] = li_interp
 
     # Save
     out_directory = os.path.join(root, "built_data", "mask_stacks", '')
     os.makedirs(out_directory, exist_ok=True)
-    li_df.to_csv(out_directory + project_name + "_li_df.csv", index=False)
+    # li_df.to_csv(out_directory + project_name + "_li_df.csv", index=False)
+    li_df_raw.to_csv(out_directory + project_name + "_li_df.csv", index=False)
 
     return li_df
 
