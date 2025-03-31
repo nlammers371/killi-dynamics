@@ -8,8 +8,8 @@ if __name__ == '__main__':
     root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\"
 
     # side 1
-    # project_name = "20250311_LCP1-NLSMSC_side1"
-    # mask_qc_wrapper(root, project_name, par_flag=False, overwrite=False, n_workers=8)
+    project_name = "20250311_LCP1-NLSMSC_side1"
+    mask_qc_wrapper(root, project_name, par_flag=True, overwrite=True)
 
     # side 2
     project_name = "20250311_LCP1-NLSMSC_side2"

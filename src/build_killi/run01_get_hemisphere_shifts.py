@@ -49,7 +49,7 @@ def get_hemisphere_shifts(root, side1_name, side2_name, interval=25, nucleus_cha
     if last_i is None:
         last_i = np.min([image_data1.shape[0], image_data2.shape[0]]) - 1
 
-    frame_vec = np.arange(last_i)
+    frame_vec = np.arange(start_i, last_i + 1)
 
     frames_to_register = list(np.arange(start_i, last_i, interval))
     frames_to_register = np.unique(frames_to_register + [last_i])

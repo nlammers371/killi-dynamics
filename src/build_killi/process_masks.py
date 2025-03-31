@@ -7,54 +7,63 @@ from scipy.sparse import csr_matrix, coo_matrix
 from tqdm.contrib.concurrent import process_map
 from functools import partial
 import multiprocessing
-import gc
-from skimage.measure import regionprops_table
-from scipy.optimize import least_squares
 from filelock import FileLock
 from skimage.morphology import remove_small_objects
+import math
 
-def fit_sphere(points, quantile=0.95):
+
+def ellipsoid_axis_lengths(central_moments):
     """
-    Fits a sphere to the given 3D points.
+    Compute ellipsoid major, intermediate, and minor axis lengths for multiple masks.
 
-    Parameters:
-        points (np.ndarray): Nx3 array of 3D coordinates.
-        mode (str): 'inner', 'outer', or 'average'.
-        quantile (float): quantile for inner/outer fitting (0-1).
+    Parameters
+    ----------
+    central_moments : ndarray
+        Array of central moments for multiple masks, with shape (N, 3, 3, 3),
+        as given by `moments_central` with order 2 for each mask.
 
-    Returns:
-        center (np.ndarray): sphere center coordinates.
-        radius (float): radius of the fitted sphere.
+    Returns
+    -------
+    radii : ndarray
+        Array of ellipsoid semi-axis lengths in descending order for each mask.
+        Shape is (N, 3); each row corresponds to (major, intermediate, minor) axis.
+    S : ndarray
+        Covariance matrices computed for each mask, with shape (N, 3, 3).
     """
-    # Initial guess for sphere center: centroid of points
-    center_init = np.mean(points, axis=0)
+    # Extract the zeroth moment for each mask (total mass/volume)
+    m0 = central_moments[:, 0, 0, 0]
 
-    def residuals(c):
-        r = np.linalg.norm(points - c, axis=1)
-        # if mode == 'average':
-        return r - r.mean()
-        # elif mode == 'inner':
-        #     target_radius = np.quantile(r, quantile)
-        #     return r - target_radius
-        # elif mode == 'outer':
-        #     target_radius = np.quantile(r, quantile)
-        #     return r - target_radius
-        # else:
-        #     raise ValueError("mode must be 'average', 'inner', or 'outer'.")
+    # Compute normalized second-order moments
+    sxx = central_moments[:, 2, 0, 0] / m0
+    syy = central_moments[:, 0, 2, 0] / m0
+    szz = central_moments[:, 0, 0, 2] / m0
+    sxy = central_moments[:, 1, 1, 0] / m0
+    sxz = central_moments[:, 1, 0, 1] / m0
+    syz = central_moments[:, 0, 1, 1] / m0
 
-    result = least_squares(residuals, center_init)
-    fitted_center = result.x
+    # Construct the covariance matrix S for each mask
+    # S has shape (N, 3, 3)
+    S = np.stack([
+        np.stack([sxx, sxy, sxz], axis=1),
+        np.stack([sxy, syy, syz], axis=1),
+        np.stack([sxz, syz, szz], axis=1)
+    ], axis=1)
 
-    # Compute final radius based on chosen mode
-    final_distances = np.linalg.norm(points - fitted_center, axis=1)
-    fitted_radius = final_distances.mean()
-    inner_radius = np.quantile(final_distances, 1 - quantile)
-    outer_radius = np.quantile(final_distances, quantile)
+    # Compute the eigenvalues of S for each mask
+    # np.linalg.eigvalsh is vectorized and returns an array of shape (N, 3)
+    eigvals = np.linalg.eigvalsh(S)
+    # Sort eigenvalues in descending order for each mask
+    eigvals = np.sort(eigvals, axis=1)[:, ::-1]
 
-    return fitted_center, fitted_radius, inner_radius, outer_radius
+    # For a homogeneous ellipsoid, the variance along a principal axis is related to
+    # the semi-axis length squared by a factor of 1/5.
+    # Therefore, the semi-axis lengths are given by sqrt(5 * eigenvalue)
+    radii = np.sqrt(5 * eigvals)
+
+    return radii, S
 
 
-def perform_mask_qc(t_int, mask_in, zarr_path, scale_vec, min_nucleus_vol, z_prox_thresh):
+def perform_mask_qc(t_int, mask_in, zarr_path, scale_vec, min_nucleus_vol, z_prox_thresh, max_eccentricity, min_overlap):
 
     mask = np.squeeze(mask_in[t_int])
 
@@ -65,8 +74,9 @@ def perform_mask_qc(t_int, mask_in, zarr_path, scale_vec, min_nucleus_vol, z_pro
     # area_vec = np.asarray([rg["area"] for rg in regions])
     area_vec = np.bincount(mask.ravel()) * np.product(scale_vec)
     lb_vec = np.arange(len(area_vec))[1:]
-    if len(lb_vec) > 10000:
+    if len(lb_vec) > 20000:
         raise Exception(f"Too many masks found in dataset ({len(lb_vec)}). Revisit your li threshold")
+
     area_vec = area_vec[1:]
     # area_vec = np.array(regions['area'])
     # lb_vec = np.asarray([rg["label"] for rg in regions])
@@ -156,7 +166,7 @@ def perform_mask_qc(t_int, mask_in, zarr_path, scale_vec, min_nucleus_vol, z_pro
 
     # now, start from z=0 and move forward, flagging potential artifacts along the way
     shadow_flag_vec = np.zeros((n_cells,), dtype=np.bool_)
-    min_overlap = 0.25
+
     # import os
     # os.environ["QT_API"] = "pyqt5"
     for i in range(n_cells):
@@ -173,7 +183,19 @@ def perform_mask_qc(t_int, mask_in, zarr_path, scale_vec, min_nucleus_vol, z_pro
 
     keep_labels01 = np.asarray([regions01[n]["label"] for n in range(n_cells) if ~shadow_flag_vec[n]])
 
-    keep_labels = np.unique(mask[np.isin(mask01, keep_labels01)])
+    # flag and remove masks that are too small along smallest dimension
+    mask02 = label(np.isin(mask01, keep_labels01))
+    props02 = regionprops(mask02, spacing=scale_vec)
+
+    moment_array = np.stack([pr["moments_central"] for pr in props02], axis=0)
+    radii, _ = ellipsoid_axis_lengths(moment_array)
+
+    e_flags = np.divide(radii[:, 0], radii[:, 1]+1e-4) <= max_eccentricity
+    e_flags = e_flags & (radii[:, 1] > 2)
+    keep_labels02 = np.asarray([props02[p]["label"] for p in range(len(props02)) if e_flags[p]])
+
+    # recover original labels
+    keep_labels = np.unique(mask[np.isin(mask02, keep_labels02)])
 
     # Define a lock file based on your zarr path
     lock_path = zarr_path + ".lock"
@@ -198,13 +220,13 @@ def perform_mask_qc(t_int, mask_in, zarr_path, scale_vec, min_nucleus_vol, z_pro
     return True
 
 
-def mask_qc_wrapper(root, project, min_nucleus_vol=250, z_prox_thresh=-30, last_i=None,
-                    overwrite=False, par_flag=False, n_workers=None):
+def mask_qc_wrapper(root, project, min_nucleus_vol=75, z_prox_thresh=-30, max_eccentricity=4.5, min_shadow_overlap=0.35,
+                    last_i=None, overwrite=False, par_flag=False, n_workers=None):
 
     if n_workers is None:
         total_cpus = multiprocessing.cpu_count()
         # Limit yourself to 33% of CPUs (rounded down, at least 1)
-        n_workers = max(1, total_cpus // 3)
+        n_workers = max(1, total_cpus // 2)
 
     # load mask zarr file
     mpath = os.path.join(root, "built_data", "mask_stacks", project + "_mask_aff.zarr")
@@ -212,16 +234,6 @@ def mask_qc_wrapper(root, project, min_nucleus_vol=250, z_prox_thresh=-30, last_
 
     if last_i is None:
         last_i = mask_full.shape[0]
-
-    # zpath = os.path.join(root, "built_data", "zarr_image_files", project + ".zarr")
-    # im_full = zarr.open(zpath, mode="r")
-    # key_list = list(im_full.attrs.keys())
-    # for key in key_list:
-    #     mask_full.attrs[key] = im_full.attrs[key]
-    # initialize output directory for cleaned masks
-    # mpath_clean = os.path.join(root, "built_data", "mask_stacks", project + "_mask_clean.zarr")
-    # mask_zarr_clean = zarr.open(mpath_clean, mode='a', shape=mask_full.shape,
-    #                      dtype=mask_full.dtype, chunks=mask_full.chunks)
 
     # get scale info
     scale_vec = tuple([mask_full.attrs['PhysicalSizeZ'],
@@ -246,8 +258,8 @@ def mask_qc_wrapper(root, project, min_nucleus_vol=250, z_prox_thresh=-30, last_
         write_indices = empty_indices
 
     # iterate through time points
-    mask_qc_run = partial(perform_mask_qc, mask_in=mask_full, zarr_path=mpath, scale_vec=scale_vec,
-                          min_nucleus_vol=min_nucleus_vol, z_prox_thresh=z_prox_thresh)
+    mask_qc_run = partial(perform_mask_qc, mask_in=mask_full, zarr_path=mpath, scale_vec=scale_vec, min_overlap=min_shadow_overlap,
+                          min_nucleus_vol=min_nucleus_vol, z_prox_thresh=z_prox_thresh, max_eccentricity=max_eccentricity)
 
     if par_flag:
         m_list = process_map(mask_qc_run, write_indices, max_workers=n_workers, chunksize=1)

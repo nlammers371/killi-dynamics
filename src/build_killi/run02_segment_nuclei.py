@@ -15,14 +15,31 @@ from scipy.interpolate import interp1d
 from tqdm.contrib.concurrent import process_map
 from func_timeout import func_timeout, FunctionTimedOut
 import statsmodels.api as sm
+import multiprocessing
+
 
 def calculate_li_trend(root, project_prefix, first_i=0, last_i=None, multiside_experiment=True):
 
     if not multiside_experiment:
-        li_df = pd.read_csv(os.path.join(root, "built_data", "mask_stacks", project_prefix + "_li_df.csv"))
+        manual_path = os.path.join(root, "built_data", "mask_stacks", project_prefix + "_li_df_manual.csv")
+        if os.path.exists(manual_path):
+            li_df = pd.read_csv(manual_path)
+        else:
+            alt_path = manual_path.replace("_manual", "")
+            li_df = pd.read_csv(alt_path)
     else:
-        li_df_raw1 = pd.read_csv(os.path.join(root, "built_data", "mask_stacks", project_prefix + "_side1_li_df.csv"))
-        li_df_raw2 = pd.read_csv(os.path.join(root, "built_data", "mask_stacks", project_prefix + "_side2_li_df.csv"))
+        manual_path1 = os.path.join(root, "built_data", "mask_stacks", project_prefix + "_side1_li_df_manual.csv")
+        if os.path.exists(manual_path1):
+            li_df_raw1 = pd.read_csv(manual_path1)
+        else:
+            alt_path1 = manual_path1.replace("_manual", "")
+            li_df_raw1 = pd.read_csv(alt_path1)
+        manual_path2 = os.path.join(root, "built_data", "mask_stacks", project_prefix + "_side2_li_df_manual.csv")
+        if os.path.exists(manual_path2):
+            li_df_raw2 = pd.read_csv(manual_path2)
+        else:
+            alt_path2 = manual_path2.replace("_manual", "")
+            li_df_raw2 = pd.read_csv(alt_path2)
         li_df = pd.concat([li_df_raw1, li_df_raw2], axis=0, ignore_index=True)
 
     # get last index if not provided
@@ -39,7 +56,7 @@ def calculate_li_trend(root, project_prefix, first_i=0, last_i=None, multiside_e
     y = li_df["li_thresh"].to_numpy()
 
     # set lower bound for 'reasonable' threshold. The estimator sometimes produces infeasibly low values
-    y_thresh = np.percentile(y, 95) / 10
+    y_thresh = np.percentile(y, 95) / 20
 
     # filter
     outlier_filter = y > y_thresh
@@ -65,9 +82,9 @@ def calculate_li_trend(root, project_prefix, first_i=0, last_i=None, multiside_e
     if not multiside_experiment:
         li_df_full.to_csv(os.path.join(root, "built_data", "mask_stacks", project_prefix + "_li_thresh_trend.csv"), index=False)
     else:
-        li_df_full.to_csv(os.path.join(root, "built_data", "mask_stacks", project_prefix + "side1_li_thresh_trend.csv"),
+        li_df_full.to_csv(os.path.join(root, "built_data", "mask_stacks", project_prefix + "_side1_li_thresh_trend.csv"),
                           index=False)
-        li_df_full.to_csv(os.path.join(root, "built_data", "mask_stacks", project_prefix + "side2_li_thresh_trend.csv"),
+        li_df_full.to_csv(os.path.join(root, "built_data", "mask_stacks", project_prefix + "_side2_li_thresh_trend.csv"),
                           index=False)
 
     return li_df_full
@@ -212,7 +229,12 @@ def do_hierarchical_watershed(im_log, thresh_range, min_mask_size=15):
     return masks_out, mask_stack
 
 
-def segment_nuclei(root, project_name, nuclear_channel=None, n_workers=8, par_flag=False, n_thresh=5, overwrite=False, last_i=None):
+def segment_nuclei(root, project_name, nuclear_channel=None, n_workers=None, par_flag=False, n_thresh=5, overwrite=False, last_i=None):
+
+    if n_workers is None:
+        total_cpus = multiprocessing.cpu_count()
+        # Limit yourself to 33% of CPUs (rounded down, at least 1)
+        n_workers = max(1, total_cpus // 2)
 
     # get raw data dir
     zarr_path = os.path.join(root, "built_data", "zarr_image_files", project_name + ".zarr")

@@ -17,7 +17,7 @@ import json
 import glob2 as glob
 
 def perform_tracking(root, project_name, config_name, model_name, first_i=None, overwrite_flag=True,
-                     stitched_lb_flag=True, track_centroids=False, last_i=None):
+                     stitched_lb_flag=True, last_i=None):
 
     # make save directory
     track_dir = config_name
