@@ -25,7 +25,7 @@ import scipy.ndimage as ndi
 from glob2 import glob
 from scipy.ndimage import mean as ndi_mean
 
-def fuse_images(frame, image1, image2, side1_shifts, side2_shifts, fuse_channel=None):
+def fuse_images(frame, image1, image2, side1_shifts, side2_shifts, out_zarr=None, fuse_channel=None):
     """
     Fuses two masks for a given frame with shifts.
 
@@ -83,10 +83,135 @@ def fuse_images(frame, image1, image2, side1_shifts, side2_shifts, fuse_channel=
     side2_weights[zdim2_orig:zdim2_orig + z_shift_size] = lin_weight_vec[::-1]
 
     # fuse maskes
-    image_fused = np.multiply(image1_shifted, side1_weights[:, np.newaxis, np.newaxis]) + \
-                  np.multiply(image2_shifted, side2_weights[:, np.newaxis, np.newaxis])
+    image_fused = (np.multiply(image1_shifted, side1_weights[:, np.newaxis, np.newaxis]) +
+                  np.multiply(image2_shifted, side2_weights[:, np.newaxis, np.newaxis])).astype(np.uint16)
 
-    return image_fused
+    # write to zarr if one is provided
+    if out_zarr is not None:
+        if (len(imshape) > 4) and (fuse_channel is not None):
+            out_zarr[frame, fuse_channel] = image_fused
+        elif imshape == 4:
+            out_zarr[frame] = image_fused
+        else:
+            raise Exception("Unexpected image shape.")
+
+        return True
+    else:
+        return image_fused
+
+def image_fusion_wrapper(root, project_name, out_root=None, overwrite=False, par_flag=True, start_i=0, stop_i=None, n_workers=None):
+
+    if n_workers is None:
+        total_cpus = multiprocessing.cpu_count()
+        # Limit yourself to 33% of CPUs (rounded down, at least 1)
+        n_workers = max(1, total_cpus // 3)
+
+    # load shift info
+    metadata_path = os.path.join(root, "metadata", project_name + "_side1", "")
+    half_shift_df = pd.read_csv(
+        os.path.join(metadata_path, project_name + "_side2" + "_to_" + project_name + "_side1" + "_shift_df.csv"))
+    # time_shift_df = pd.read_csv(os.path.join(metadata_path, "frame_shift_df.csv"))
+
+    # generate shift arrays
+    side2_shifts = half_shift_df.copy()  # + time_shift_df.copy()
+    side1_shifts = half_shift_df.copy()
+    side1_shifts[["zs", "ys", "xs"]] = 0  # no shift for side1
+
+    # load zarr arrays for each side
+    image_zarr_path1 = os.path.join(root, "built_data", "zarr_image_files", project_name + "_side1.zarr")
+    image_zarr_path2 = os.path.join(root, "built_data", "zarr_image_files", project_name + "_side2.zarr")
+
+    image_zarr1 = zarr.open(image_zarr_path1, mode='r')
+    image_zarr2 = zarr.open(image_zarr_path2, mode='r')
+
+    if stop_i is None:
+        stop_i = image_zarr1.shape[0]
+
+    # get output dims
+    zdim1_orig = image_zarr1.shape[-3]
+    zdim2_orig = image_zarr2.shape[-3]
+    full_z = zdim1_orig + zdim2_orig
+    multichannel_flag = False
+    if len(image_zarr1.shape) == 4:  # tzyx
+        full_shape = tuple([image_zarr1.shape[0], full_z]) + tuple(image_zarr1.shape[-2:])
+        chunksize = (1, ) + (full_shape[1:])
+    elif len(image_zarr1.shape) == 5:  # tczyx
+        multichannel_flag = True
+        full_shape = tuple([image_zarr1.shape[0], image_zarr1.shape[1], full_z]) + tuple(image_zarr1.shape[-2:])
+        chunksize = (1, 1) + (full_shape[2:])
+    else:
+        raise Exception("Image zarr has unexpected shape.")
+
+    # generate output zarr path
+    if out_root is None:
+        fused_image_zarr_path = os.path.join(root, "built_data", "zarr_image_files", project_name + "_fused.zarr")
+    else:
+        fused_image_zarr_path = os.path.join(out_root, "built_data", "zarr_image_files", project_name + "_fused.zarr")
+    fused_image_zarr = zarr.open(fused_image_zarr_path, mode='a', shape=full_shape, dtype=np.uint16, chunks=chunksize)
+
+    # check which indices to write
+    # get all indices
+    all_indices = set(range(start_i, stop_i))
+
+    # List files directly within zarr directory (recursive search):
+    existing_chunks = os.listdir(fused_image_zarr_path)
+
+    # Extract time indices from chunk filenames:
+    written_frames = np.asarray([int(fname.split(".")[0]) for fname in existing_chunks if fname[0].isdigit()])
+    if multichannel_flag:
+        written_channels = np.asarray([int(fname.split(".")[1]) for fname in existing_chunks if fname[0].isdigit()])
+        written_indices0 = set(written_frames[written_channels == 0])
+        written_indices1 = set(written_frames[written_channels == 1])
+        empty_indices0 = np.asarray(sorted(all_indices - written_indices0))
+        empty_indices1 = np.asarray(sorted(all_indices - written_indices1))
+        if overwrite:
+            write_indices = np.asarray(list(all_indices))
+            write_indices1 = np.asarray(list(all_indices))
+        else:
+            write_indices = empty_indices0
+            write_indices1 = empty_indices1
+    else:
+        written_indices = set(written_frames)
+        empty_indices = np.asarray(sorted(all_indices - written_indices))
+
+        if overwrite:
+            write_indices = np.asarray(list(all_indices))
+        else:
+            write_indices = empty_indices
+
+    if multichannel_flag:
+        fuse_run0 = partial(fuse_images, image1=image_zarr1, image2=image_zarr2, side1_shifts=side1_shifts,
+                           side2_shifts=side2_shifts, out_zarr=fused_image_zarr, fuse_channel=0)
+        fuse_run1 = partial(fuse_images, image1=image_zarr1, image2=image_zarr2, side1_shifts=side1_shifts,
+                            side2_shifts=side2_shifts, out_zarr=fused_image_zarr, fuse_channel=1)
+    else:
+        fuse_run0 = partial(fuse_images, image1=image_zarr1, image2=image_zarr2, side1_shifts=side1_shifts,
+                            side2_shifts=side2_shifts, out_zarr=fused_image_zarr)
+
+    if par_flag:
+        print("Using parallel processing")
+        print("Fusing channel 0")
+        results0 = process_map(fuse_run0, write_indices, max_workers=n_workers, chunksize=1)
+        if multichannel_flag:
+            print("Fusing channel 1")
+            results1 = process_map(fuse_run1, write_indices1, max_workers=n_workers, chunksize=1)
+
+    else:
+        results0 = []
+        for f in tqdm(write_indices, desc="Processing channel 0 for image fusion..."):
+            result = fuse_run0(f)
+            results0.append(result)
+        if multichannel_flag:
+            results1 = []
+            for f in tqdm(write_indices1, desc="Processing channel 1 for image fusion..."):
+                result = fuse_run1(f)
+                results1.append(result)
+
+    if multichannel_flag:
+        return results0, results1
+    else:
+        return results0
+
 
 def integrate_fluorescence(t, image_zarr, image_zarr1, image_zarr2, side1_shifts, side2_shifts, mask_zarr,
                            fluo_channel, out_folder):
@@ -358,10 +483,6 @@ def integrate_fluorescence_wrapper(root, project_name, fluo_channel, fused_flag=
                     side2_shifts=side2_shifts, side1_shifts=side1_shifts, image_zarr1=image_zarr1, image_zarr2=image_zarr2)
             results.append(result)
 
-    # # combine
-    # fluo_df = pd.concat(results, ignore_index=True)
-    #
-    #
     return True
 
 def sh_mask_filter(mask, scale_vec, L_max=15, mesh_res=100, max_surf_dist=30, area_thresh=500):
@@ -497,7 +618,7 @@ def labels_to_contours_nl(
         process_map(label_fun_run, write_indices, max_workers=n_workers, chunksize=1)
     else:
         print("Using sequential processing")
-        for t in [2300]: #tqdm(write_indices):
+        for t in tqdm(write_indices):
             label_fun_run(t)
 
     return foreground, contours
