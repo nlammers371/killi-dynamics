@@ -25,6 +25,178 @@ import scipy.ndimage as ndi
 from glob2 import glob
 from scipy.ndimage import mean as ndi_mean
 
+
+def add_spherical_mask(mask, center, radius, scale_vec, value=1):
+    """
+    Efficiently add a spherical mask to a 3D numpy array by computing the region
+    of interest (the bounding box around the sphere) and applying the sphere mask there.
+
+    Parameters:
+        mask (np.ndarray): 3D array (shape: (z, y, x)) representing your mask.
+        center (tuple of floats): Coordinates (z, y, x) of the sphere's centroid.
+        radius (float): Radius of the sphere.
+        value (int, optional): The value to assign to voxels inside the sphere.
+
+    Returns:
+        np.ndarray: The modified mask with the spherical region set to the specified value.
+    """
+    z_dim, y_dim, x_dim = mask.shape
+    z0, y0, x0 = center
+
+    # Determine the bounding box indices, ensuring they stay within mask bounds.
+    z_min = max(int(np.floor(z0 - radius)), 0)
+    z_max = min(int(np.ceil(z0 + radius)) + 1, z_dim)
+    y_min = max(int(np.floor(y0 - radius)), 0)
+    y_max = min(int(np.ceil(y0 + radius)) + 1, y_dim)
+    x_min = max(int(np.floor(x0 - radius)), 0)
+    x_max = min(int(np.ceil(x0 + radius)) + 1, x_dim)
+
+    # Generate coordinate arrays only for the bounding box.
+    z, y, x = np.ogrid[z_min:z_max, y_min:y_max, x_min:x_max]
+
+    # Compute the mask for the sphere in the subregion.
+    sphere = (((z - z0) * scale_vec[0]) ** 2 + ((y - y0) * scale_vec[1]) ** 2 + (
+                (x - x0) * scale_vec[2]) ** 2) <= radius ** 2
+
+    # Update only the subregion of the main mask.
+    mask[z_min:z_max, y_min:y_max, x_min:x_max][sphere] = value
+
+    return mask
+
+
+def generate_marker_mask(frame_i, mask_zarr, image_zarr, out_zarr, fluo_channel, fluo_df_dict,
+                         n_masks_per_frame, lcp_thresh, min_size, overlap_thresh, ball_radius, scale_vec):
+    # frame_i = 2200
+    mask = np.squeeze(mask_zarr[frame_i])
+    im = np.squeeze(image_zarr[frame_i, fluo_channel])
+    fluo_df = fluo_df_dict[frame_i]
+
+    # first get bright lcp regions (ig any)
+    im_thresh = im > lcp_thresh
+    # im_thresh_ft = morphology.remove_small_objects(im_thresh, min_size=min_size)
+    im_thresh_lb_raw = label(im_thresh)
+    props_raw = regionprops(im_thresh_lb_raw, spacing=scale_vec)
+    areas = np.array([prop.area for prop in props_raw])
+    label_vec = np.array([prop.label for prop in props_raw])
+    im_thresh_lb = label(np.isin(im_thresh_lb_raw, label_vec[areas > min_size]))
+
+    # first get brightest existing nuclear masks
+    top_indices = np.argsort(fluo_df["mean_fluo"].to_numpy())[-n_masks_per_frame:]
+    top_labels = fluo_df.loc[top_indices, "nucleus_id"].to_numpy()
+
+    # get region coordinates
+    props = regionprops(mask, spacing=scale_vec)
+    labels_to_skip = []
+    for lb in tqdm(top_labels):
+        coords = props[lb - 1].coords
+        # check to see if region overlaps with
+        fluo_pixels = im_thresh_lb[coords[:, 0], coords[:, 1], coords[:, 2]]
+        fi, fc = np.unique(fluo_pixels, return_counts=True)
+        if np.any(fi > 0):
+            # get the largest region
+            fc_max = np.max(fc[fi > 0]) / np.sum(fc)
+            if fc_max > overlap_thresh:
+                labels_to_skip.append(lb)
+
+    # figure out what to add
+    labels_to_skip = np.asarray(labels_to_skip)
+    labels_to_add = top_labels[~np.isin(top_labels, labels_to_skip)]
+
+    # add
+    curr_label = np.max(im_thresh_lb) + 1
+    for lb in tqdm(labels_to_add):
+        coords = props[lb - 1].coords
+        # check to see if region overlaps with
+        fluo_pixels = im_thresh_lb[coords[:, 0], coords[:, 1], coords[:, 2]]
+        z_filter = fluo_pixels == 0
+        if np.sum(z_filter) > 0:
+            im_thresh_lb[coords[z_filter, 0], coords[z_filter, 1], coords[z_filter, 2]] = curr_label
+            curr_label += 1
+
+    # get centroids
+    props = regionprops(im_thresh_lb)
+    centroids = np.array([prop.centroid for prop in props]).astype(int)
+
+    # make new mask array
+    new_mask = np.zeros_like(mask)
+    # new_mask[centroids[:, 0], centroids[:, 1], centroids[:, 2]] = 1
+
+    # Compute the distance transform
+    # print("Computing distance transform...")
+    # distances = ndimage.distance_transform_edt(new_mask==0, sampling=scale_vec)
+
+    # Create a mask for the spheres
+    for c in tqdm(range(centroids.shape[0]), "Generating output mask..."):
+        new_mask = add_spherical_mask(new_mask, centroids[c, :], ball_radius, value=c + 1, scale_vec=scale_vec)
+
+    out_zarr[frame_i] = new_mask
+
+    return True
+
+
+def marker_mask_wrapper(root, project_name, fluo_channel,
+                        overwrite_flag=False, par_flag=False, n_workers=None,
+                        overlap_thresh=0.25, mask_range=None,
+                        n_masks_per_frame=50, lcp_thresh=110, min_size=50, ball_radius=9, suffix=""):
+
+    if n_workers is None:
+        total_cpus = multiprocessing.cpu_count()
+        # Limit yourself to 33% of CPUs (rounded down, at least 1)
+        n_workers = max(1, total_cpus // 3)
+
+    # load mask dataset
+    mpath = os.path.join(root, "built_data", "mask_stacks", project_name + "_mask_fused.zarr")
+    mask_full = zarr.open(mpath, mode="a")
+
+    # load images
+    zpath = os.path.join(root, "built_data", "zarr_image_files", project_name + "_fused.zarr")
+    fused_image = zarr.open(zpath, mode="r")
+
+    # initialize output path
+    output_path = os.path.join(root, "built_data", "mask_stacks", project_name + "_marker_masks" + suffix + ".zarr")
+    marker_mask_zarr = zarr.open(output_path, mode="a", shape=mask_full.shape, chunks=mask_full.chunks, dtype=np.uint16)
+
+    if mask_range is None:
+        mask_range = [0, mask_full.shape[0]]
+
+    # figure out which indices we need to process
+    # determine which frames need to be analyzed
+    all_indices = set(range(mask_range[0], mask_range[1]))
+    # List files directly within output directory:
+    existing_chunks = os.listdir(output_path)
+    existing_indices = set(int(fname[-8:-4]) for fname in existing_chunks if fname[-8:-4].isdigit())
+    # Extract time indices from chunk filenames:
+    if overwrite_flag:
+        write_indices = all_indices
+    else:
+        write_indices = all_indices - existing_indices
+
+    # get scale info
+    scale_vec = tuple(
+        [mask_full.attrs['PhysicalSizeZ'], mask_full.attrs['PhysicalSizeY'], mask_full.attrs['PhysicalSizeX']])
+
+    # load fluo datasts
+    fluo_path = os.path.join(root, "built_data", "fluorescence_data", project_name, "")
+    fluo_df_path_list = sorted(glob(fluo_path + "*.csv"))
+    fluo_df_dict = dict({})
+    for fluo_p in tqdm(fluo_df_path_list):
+        df = pd.read_csv(fluo_p)
+        frame = df.loc[0, "frame"]
+        fluo_df_dict[frame] = df
+
+    mask_fun_run = partial(generate_marker_mask, mask_zarr=mask_full, image_zarr=fused_image, out_zarr=marker_mask_zarr,
+                           fluo_channel=fluo_channel, fluo_df_dict=fluo_df_dict, n_masks_per_frame=n_masks_per_frame,
+                           lcp_thresh=lcp_thresh, min_size=min_size, overlap_thresh=overlap_thresh,
+                           ball_radius=ball_radius, scale_vec=scale_vec)
+    if par_flag:
+        process_map(mask_fun_run, write_indices, max_workers=n_workers)
+
+    else:
+        for frame_i in tqdm(write_indices, "Adding masks..."):
+            mask_fun_run(frame_i)
+
+
+    return True
 def fuse_images(frame, image1, image2, side1_shifts, side2_shifts, out_zarr=None, fuse_channel=None):
     """
     Fuses two masks for a given frame with shifts.

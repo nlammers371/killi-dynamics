@@ -1,10 +1,9 @@
 import zarr
 import napari
 import numpy as np
-from src.build_killi.build_utils import fit_sphere_and_sh, create_sphere_mesh, create_sh_mesh, fuse_images
+# from src.build_killi.build_utils import fit_sphere_and_sh, create_sphere_mesh, create_sh_mesh, fuse_images
 import pandas as pd
-import statsmodels.api as sm
-from src.build_killi.run02_segment_nuclei import calculate_li_thresh
+# from src.build_killi.run02_segment_nuclei import calculate_li_thresh
 import os
 from skimage.measure import label, regionprops
 from scipy.interpolate import interp1d
@@ -27,14 +26,13 @@ tracking_path = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\kill
 seg_zarr = zarr.open(os.path.join(tracking_path, "segments.zarr"), mode="r")
 
 # load images
-print("Generating fused image...")
 zpath = os.path.join(d_root, "built_data", "zarr_image_files", project_name + "_fused.zarr")
 
 fused_image = zarr.open(zpath, mode="r")
 im0 = np.squeeze(fused_image[t_int, 0])
 im1 = np.squeeze(fused_image[t_int, 1])
 
-data_log_i, _ = calculate_li_thresh(im1, thresh_li=20)
+# data_log_i, _ = calculate_li_thresh(im1, thresh_li=20)
 
 # load fluorescence data
 fluo_df = pd.read_csv(f"E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\built_data\\fluorescence_data\\20250311_LCP1-NLSMSC\\fluorescence_data_frame_{t_int:04}.csv")
@@ -53,8 +51,8 @@ viewer.add_labels(mask, scale=scale_vec)
 viewer.add_labels(seg_mask, scale=scale_vec)
 # viewer.add_labels(det_mask, scale=scale_vec)
 viewer.add_image(im0, name="lcp1", scale=scale_vec)
-# viewer.add_image(im1, name="nls", scale=scale_vec)
-viewer.add_image(data_log_i, name="nls-LoG", scale=scale_vec)
+viewer.add_image(im1, name="nls", scale=scale_vec)
+# viewer.add_image(data_log_i, name="nls-LoG", scale=scale_vec)
 
 # # viewer.add_surface((sphere_mesh[0], sphere_mesh[1], r_sh), name='My Surface', opacity=0.8, colormap='viridis')
 # viewer.add_surface((sh_mesh[0], sh_mesh[1], r_sh), name='My Surface', opacity=0.8, colormap='viridis')

@@ -16,7 +16,7 @@ if __name__ == "__main__":
     stop_i = 2339
     view_range = np.arange(2137, 2148)
     viewer = check_tracking(root, project_name, tracking_config=config_name, seg_model=model_name, well_num=None,
-                            start_i=start_i, stop_i=stop_i, view_range=view_range, use_fused=True, suffix="", )
+                            start_i=start_i, stop_i=stop_i, view_range=view_range, use_fused=True, suffix="_cb", )
 
     napari.run()
 
