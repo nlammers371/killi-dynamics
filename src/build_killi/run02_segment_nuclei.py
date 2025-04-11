@@ -17,7 +17,6 @@ from func_timeout import func_timeout, FunctionTimedOut
 import statsmodels.api as sm
 import multiprocessing
 
-
 def calculate_li_trend(root, project_prefix, first_i=0, last_i=None, multiside_experiment=True):
 
     if not multiside_experiment:
@@ -229,7 +228,8 @@ def do_hierarchical_watershed(im_log, thresh_range, min_mask_size=15):
     return masks_out, mask_stack
 
 
-def segment_nuclei(root, project_name, nuclear_channel=None, n_workers=None, par_flag=False, n_thresh=5, overwrite=False, last_i=None):
+def segment_nuclei(root, project_name, nuclear_channel=None, n_workers=None, par_flag=False, n_thresh=5,
+                   overwrite=False, last_i=None):
 
     if n_workers is None:
         total_cpus = multiprocessing.cpu_count()

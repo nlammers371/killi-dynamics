@@ -32,8 +32,6 @@ fused_image = zarr.open(zpath, mode="r")
 im0 = np.squeeze(fused_image[t_int, 0])
 im1 = np.squeeze(fused_image[t_int, 1])
 
-# data_log_i, _ = calculate_li_thresh(im1, thresh_li=20)
-
 # load fluorescence data
 fluo_df = pd.read_csv(f"E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\built_data\\fluorescence_data\\20250311_LCP1-NLSMSC\\fluorescence_data_frame_{t_int:04}.csv")
 

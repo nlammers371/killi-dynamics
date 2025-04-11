@@ -65,14 +65,14 @@ def add_spherical_mask(mask, center, radius, scale_vec, value=1):
 
 
 def generate_marker_mask(frame_i, mask_zarr, image_zarr, out_zarr, fluo_channel, fluo_df_dict,
-                         n_masks_per_frame, lcp_thresh, min_size, overlap_thresh, ball_radius, scale_vec):
+                         n_masks_per_frame, fluo_thresh, min_size, overlap_thresh, ball_radius, scale_vec):
     # frame_i = 2200
     mask = np.squeeze(mask_zarr[frame_i])
     im = np.squeeze(image_zarr[frame_i, fluo_channel])
     fluo_df = fluo_df_dict[frame_i]
 
     # first get bright lcp regions (ig any)
-    im_thresh = im > lcp_thresh
+    im_thresh = im > fluo_thresh
     # im_thresh_ft = morphology.remove_small_objects(im_thresh, min_size=min_size)
     im_thresh_lb_raw = label(im_thresh)
     props_raw = regionprops(im_thresh_lb_raw, spacing=scale_vec)
@@ -81,14 +81,15 @@ def generate_marker_mask(frame_i, mask_zarr, image_zarr, out_zarr, fluo_channel,
     im_thresh_lb = label(np.isin(im_thresh_lb_raw, label_vec[areas > min_size]))
 
     # first get brightest existing nuclear masks
+    fluo_df = fluo_df.reset_index(drop=True)
     top_indices = np.argsort(fluo_df["mean_fluo"].to_numpy())[-n_masks_per_frame:]
     top_labels = fluo_df.loc[top_indices, "nucleus_id"].to_numpy()
 
     # get region coordinates
-    props = regionprops(mask, spacing=scale_vec)
+    mask_props = regionprops(mask, spacing=scale_vec)
     labels_to_skip = []
-    for lb in tqdm(top_labels):
-        coords = props[lb - 1].coords
+    for lb in top_labels:
+        coords = mask_props[lb - 1].coords
         # check to see if region overlaps with
         fluo_pixels = im_thresh_lb[coords[:, 0], coords[:, 1], coords[:, 2]]
         fi, fc = np.unique(fluo_pixels, return_counts=True)
@@ -104,12 +105,12 @@ def generate_marker_mask(frame_i, mask_zarr, image_zarr, out_zarr, fluo_channel,
 
     # add
     curr_label = np.max(im_thresh_lb) + 1
-    for lb in tqdm(labels_to_add):
-        coords = props[lb - 1].coords
+    for lb in labels_to_add:
+        coords = mask_props[lb - 1].coords
         # check to see if region overlaps with
         fluo_pixels = im_thresh_lb[coords[:, 0], coords[:, 1], coords[:, 2]]
         z_filter = fluo_pixels == 0
-        if np.sum(z_filter) > 0:
+        if np.sum(z_filter) > min_size:
             im_thresh_lb[coords[z_filter, 0], coords[z_filter, 1], coords[z_filter, 2]] = curr_label
             curr_label += 1
 
@@ -119,14 +120,8 @@ def generate_marker_mask(frame_i, mask_zarr, image_zarr, out_zarr, fluo_channel,
 
     # make new mask array
     new_mask = np.zeros_like(mask)
-    # new_mask[centroids[:, 0], centroids[:, 1], centroids[:, 2]] = 1
-
-    # Compute the distance transform
-    # print("Computing distance transform...")
-    # distances = ndimage.distance_transform_edt(new_mask==0, sampling=scale_vec)
-
     # Create a mask for the spheres
-    for c in tqdm(range(centroids.shape[0]), "Generating output mask..."):
+    for c in range(centroids.shape[0]):
         new_mask = add_spherical_mask(new_mask, centroids[c, :], ball_radius, value=c + 1, scale_vec=scale_vec)
 
     out_zarr[frame_i] = new_mask
@@ -137,7 +132,7 @@ def generate_marker_mask(frame_i, mask_zarr, image_zarr, out_zarr, fluo_channel,
 def marker_mask_wrapper(root, project_name, fluo_channel,
                         overwrite_flag=False, par_flag=False, n_workers=None,
                         overlap_thresh=0.25, mask_range=None,
-                        n_masks_per_frame=50, lcp_thresh=110, min_size=50, ball_radius=9, suffix=""):
+                        n_masks_per_frame=50, lcp_thresh=115, min_size=50, ball_radius=9, suffix=""):
 
     if n_workers is None:
         total_cpus = multiprocessing.cpu_count()
@@ -179,17 +174,18 @@ def marker_mask_wrapper(root, project_name, fluo_channel,
     fluo_path = os.path.join(root, "built_data", "fluorescence_data", project_name, "")
     fluo_df_path_list = sorted(glob(fluo_path + "*.csv"))
     fluo_df_dict = dict({})
-    for fluo_p in tqdm(fluo_df_path_list):
+    for fluo_p in tqdm(fluo_df_path_list, "Loading fluorescence data files..."):
         df = pd.read_csv(fluo_p)
         frame = df.loc[0, "frame"]
         fluo_df_dict[frame] = df
 
     mask_fun_run = partial(generate_marker_mask, mask_zarr=mask_full, image_zarr=fused_image, out_zarr=marker_mask_zarr,
                            fluo_channel=fluo_channel, fluo_df_dict=fluo_df_dict, n_masks_per_frame=n_masks_per_frame,
-                           lcp_thresh=lcp_thresh, min_size=min_size, overlap_thresh=overlap_thresh,
+                           fluo_thresh=lcp_thresh, min_size=min_size, overlap_thresh=overlap_thresh,
                            ball_radius=ball_radius, scale_vec=scale_vec)
     if par_flag:
-        process_map(mask_fun_run, write_indices, max_workers=n_workers)
+        print("Generating masks using parallel processing...")
+        process_map(mask_fun_run, write_indices, max_workers=n_workers, chunksize=1)
 
     else:
         for frame_i in tqdm(write_indices, "Adding masks..."):
@@ -385,8 +381,7 @@ def image_fusion_wrapper(root, project_name, out_root=None, overwrite=False, par
         return results0
 
 
-def integrate_fluorescence(t, image_zarr, image_zarr1, image_zarr2, side1_shifts, side2_shifts, mask_zarr,
-                           fluo_channel, out_folder):
+def integrate_fluorescence(t, image_zarr,  mask_zarr, fluo_channel, out_folder):
     """
     Integrates fluorescence values for a given time point and mask.
 
@@ -401,15 +396,9 @@ def integrate_fluorescence(t, image_zarr, image_zarr1, image_zarr2, side1_shifts
     """
 
     mask_frame = np.squeeze(mask_zarr[t])
-    if image_zarr is not None:
-        im_frame = np.squeeze(image_zarr[t, fluo_channel])
-        meta = image_zarr.attrs
-    elif image_zarr2 is not None:
-        # print("Fusing images for frame", t)
-        meta = image_zarr1.attrs
-        im_frame = fuse_images(t, image_zarr1, image_zarr2, side1_shifts, side2_shifts, fuse_channel=fluo_channel)
-    else:
-        raise Exception("No image zarr provided.")
+    # if image_zarr is not None:
+    im_frame = np.squeeze(image_zarr[t, fluo_channel])
+    meta = image_zarr.attrs
 
     if "voxel_size_um" not in meta.keys():
         # get scale info
@@ -425,25 +414,28 @@ def integrate_fluorescence(t, image_zarr, image_zarr1, image_zarr2, side1_shifts
     fluo_df = pd.DataFrame(label_vec, columns=["nucleus_id"])
     fluo_df["frame"] = t
     centroids = np.array([pr.centroid for pr in props])
-    fluo_df[["z", "y", "x"]] = centroids
-    # fluo_mean = ndi_mean(im_frame, labels=mask_frame, index=label_vec)
-    # fluo_df["mean_fluo"] = fluo_mean
-    for p, pr in enumerate(props):
-        # get array indices corresponding to nucleus mask from props
-        coords = pr.coords
-        # get the mean fluorescence value for each nucleus using coordinates
-        fluo_df.loc[fluo_df["nucleus_id"] == pr.label, "mean_fluo"] = np.mean(im_frame[coords[:, 0], coords[:, 1], coords[:, 2]])
-
+    if centroids.size > 0:
+        fluo_df[["z", "y", "x"]] = centroids
+        # fluo_mean = ndi_mean(im_frame, labels=mask_frame, index=label_vec)
+        # fluo_df["mean_fluo"] = fluo_mean
+        for p, pr in enumerate(props):
+            # get array indices corresponding to nucleus mask from props
+            coords = pr.coords
+            # get the mean fluorescence value for each nucleus using coordinates
+            fluo_df.loc[fluo_df["nucleus_id"] == pr.label, "mean_fluo"] = np.mean(im_frame[coords[:, 0], coords[:, 1], coords[:, 2]])
+    else:
+        fluo_df = pd.DataFrame(columns=["nucleus_id", "frame", "z", "y", "x", "mean_fluo"])
     # save
     output_file = os.path.join(out_folder, f"fluorescence_data_frame_{t:04}.csv")
     fluo_df.to_csv(output_file, index=False)
 
     return fluo_df
 
-def transfer_fluorescence(frame_i, fluo_df_list, tracked_mask_zarr, mask_zarr):
+def transfer_fluorescence(frame_i, fluo_df, tracked_mask_zarr, mask_zarr, start_i):
+
     # do the label transfer
-    fluo_df_frame = fluo_df_list[frame_i]
-    props = regionprops(tracked_mask_zarr[frame_i])
+    fluo_df_frame = fluo_df.loc[fluo_df["frame"] == frame_i, :]
+    props = regionprops(tracked_mask_zarr[frame_i - start_i])
     label_vec = np.array([pr.label for pr in props])
     fluo_vec = np.zeros(len(label_vec), dtype=np.float32)  # initialize fluorescence vector
     mask_frame = mask_zarr[frame_i]
@@ -472,7 +464,7 @@ def transfer_fluorescence(frame_i, fluo_df_list, tracked_mask_zarr, mask_zarr):
     return temp_df
 
 def transfer_fluorescence_wrapper(root, project_name, fused_flag=True, tracking_config=None, tracking_range=None,
-                                  suffix="", well_num=0, overwrite=False, n_workers=None, par_flag=False):
+                                  suffix="", well_num=0, overwrite=False, use_markers_flag=False, n_workers=None, par_flag=False):
 
     """
     :param root:
@@ -492,7 +484,10 @@ def transfer_fluorescence_wrapper(root, project_name, fused_flag=True, tracking_
         n_workers = max(1, total_cpus // 3)
 
     # get path to fluo files
-    fluo_path = os.path.join(root, "built_data", "fluorescence_data", project_name, "")
+    if use_markers_flag:
+        fluo_path = os.path.join(root, "built_data", "fluorescence_data", project_name + "_markers", "")
+    else:
+        fluo_path = os.path.join(root, "built_data", "fluorescence_data", project_name, "")
     fluo_df_path_list = sorted(glob(fluo_path + "*.csv"))
     fluo_df_list = []
     for fluo_file in tqdm(fluo_df_path_list, "Loading fluorescence data files..."):
@@ -503,7 +498,9 @@ def transfer_fluorescence_wrapper(root, project_name, fused_flag=True, tracking_
     # fluo_df = pd.concat(fluo_df_list, ignore_index=True)
 
     # path to raw masks
-    if fused_flag:
+    if use_markers_flag:
+        mask_zarr_path = os.path.join(root, "built_data", "mask_stacks", project_name + "_marker_masks.zarr")
+    elif fused_flag:
         mask_zarr_path = os.path.join(root, "built_data", "mask_stacks", project_name + "_mask_fused.zarr")
     else:
         mask_zarr_path = os.path.join(root, "built_data", "mask_stacks", project_name + "_mask_aff.zarr")
@@ -517,6 +514,11 @@ def transfer_fluorescence_wrapper(root, project_name, fused_flag=True, tracking_
     tracking_name = tracking_config.replace(".txt", "")
     start_i, stop_i = tracking_range[0], tracking_range[1]
 
+    fluo_df_full = pd.concat(fluo_df_list, ignore_index=True)
+
+    if use_markers_flag:
+        project_name += "_marker"
+
     # set output path for tracking results
     project_path = os.path.join(root, "tracking", project_name, tracking_name, f"well{well_num:04}", "")
     project_sub_path = os.path.join(project_path, f"track_{start_i:04}" + f"_{stop_i:04}" + suffix, "")
@@ -529,8 +531,8 @@ def transfer_fluorescence_wrapper(root, project_name, fused_flag=True, tracking_
     tracks_df = pd.read_csv(os.path.join(project_sub_path, "tracks.csv"))
     # tracks_df_fluo = tracks_df.copy()
 
-    transfer_run = partial(transfer_fluorescence, fluo_df_list=fluo_df_list, tracked_mask_zarr=tracked_mask_zarr,
-                           mask_zarr=mask_zarr)
+    transfer_run = partial(transfer_fluorescence, start_i=start_i, fluo_df=fluo_df_full,
+                           tracked_mask_zarr=tracked_mask_zarr, mask_zarr=mask_zarr)
 
     if par_flag:
         tr_df_list = process_map(transfer_run, range(start_i, stop_i), max_workers=n_workers, chunksize=1)
@@ -548,8 +550,7 @@ def transfer_fluorescence_wrapper(root, project_name, fused_flag=True, tracking_
 
 # define wrapper function for parallel processing
 def integrate_fluorescence_wrapper(root, project_name, fluo_channel, fused_flag=True, overwrite=False,
-                                   par_flag=True, start_i=0, stop_i=None, n_workers=None):
-                                   # tracking_config=None, suffix="", well_num=0):
+                                   par_flag=True, start_i=0, stop_i=None, n_workers=None, use_markers_flag=False):
     """
 
     :param root:
@@ -573,54 +574,29 @@ def integrate_fluorescence_wrapper(root, project_name, fluo_channel, fused_flag=
         n_workers = max(1, total_cpus // 3)
 
     # Save the integrated fluorescence values to a CSV file
-    output_path = os.path.join(root, "built_data", "fluorescence_data", project_name, "")
+    if use_markers_flag:
+        output_path = os.path.join(root, "built_data", "fluorescence_data", project_name + "_markers", "")
+    else:
+        output_path = os.path.join(root, "built_data", "fluorescence_data", project_name, "")
     os.makedirs(output_path, exist_ok=True)
-
-    # path to raw masks
-
-    # if tracking_config is not None:
-    #
-    #     # get name
-    #     tracking_name = tracking_config.replace(".txt", "")
-    #
-    #     # set output path for tracking results
-    #     project_path = os.path.join(root, "tracking", project_name, tracking_name, f"well{well_num:04}", "")
-    #     project_sub_path = os.path.join(project_path, f"track_{start_i:04}" + f"_{stop_i:04}" + suffix, "")
-    #     mask_zarr_path = os.path.join(project_sub_path, "segments.zarr")
 
     # define paths
     if fused_flag:
-        image_zarr_path1 = os.path.join(root, "built_data", "zarr_image_files", project_name + "_side1.zarr")
-        image_zarr_path2 = os.path.join(root, "built_data", "zarr_image_files", project_name + "_side2.zarr")
-        image_zarr = None
-        image_zarr1 = zarr.open(image_zarr_path1, mode='r')
-        image_zarr2 = zarr.open(image_zarr_path2, mode='r')
-        # if tracking_config is None:
-        mask_zarr_path = os.path.join(root, "built_data", "mask_stacks", project_name + "_mask_fused.zarr")
+        image_zarr_path = os.path.join(root, "built_data", "zarr_image_files", project_name + "_fused.zarr")
+        if use_markers_flag:
+            mask_zarr_path = os.path.join(root, "built_data", "mask_stacks", project_name + "_marker_masks.zarr")
+        else:
+            mask_zarr_path = os.path.join(root, "built_data", "mask_stacks", project_name + "_mask_fused.zarr")
     else:
         image_zarr_path = os.path.join(root, "built_data", "zarr_image_files", project_name + ".zarr")
-        image_zarr = zarr.open(image_zarr_path, mode='r')
-        image_zarr1 = None
-        image_zarr2 = None
-        # if tracking_config is None:
-        mask_zarr_path = os.path.join(root, "built_data", "mask_stacks", project_name + "_mask_aff.zarr")
+        if use_markers_flag:
+            mask_zarr_path = os.path.join(root, "built_data", "mask_stacks", project_name + "_marker_masks.zarr")
+        else:
+            mask_zarr_path = os.path.join(root, "built_data", "mask_stacks", project_name + "_mask_aff.zarr")
 
     # load zarr files
     mask_zarr = zarr.open(mask_zarr_path, mode='r')
-
-    if fused_flag:
-        # load shift info
-        metadata_path = os.path.join(root, "metadata", project_name + "_side1", "")
-        half_shift_df = pd.read_csv(os.path.join(metadata_path, project_name + "_side2" + "_to_" + project_name + "_side1" + "_shift_df.csv"))
-        # time_shift_df = pd.read_csv(os.path.join(metadata_path, "frame_shift_df.csv"))
-
-        # generate shift arrays
-        side2_shifts = half_shift_df.copy() #+ time_shift_df.copy()
-        side1_shifts = half_shift_df.copy()
-        side1_shifts[["zs", "ys", "xs"]] = 0  # no shift for side1
-    else:
-        side2_shifts = None
-        side1_shifts = None
+    image_zarr = zarr.open(image_zarr_path, mode='r')
 
     if stop_i is None:
         stop_i = mask_zarr.shape[0]
@@ -640,8 +616,7 @@ def integrate_fluorescence_wrapper(root, project_name, fluo_channel, fused_flag=
         print("Using parallel processing")
         # Use process_map for parallel processing
         results = process_map(
-            partial(integrate_fluorescence, image_zarr=image_zarr, mask_zarr=mask_zarr, fluo_channel=fluo_channel, out_folder=output_path,
-                    side2_shifts=side2_shifts, side1_shifts=side1_shifts, image_zarr1=image_zarr1, image_zarr2=image_zarr2),
+            partial(integrate_fluorescence, image_zarr=image_zarr, mask_zarr=mask_zarr, fluo_channel=fluo_channel, out_folder=output_path),
             write_indices,
             max_workers=n_workers,
             chunksize=1
@@ -651,8 +626,7 @@ def integrate_fluorescence_wrapper(root, project_name, fluo_channel, fused_flag=
         # Sequential processing
         results = []
         for t in tqdm(write_indices):
-            result = integrate_fluorescence(t, image_zarr=image_zarr, mask_zarr=mask_zarr, fluo_channel=fluo_channel, out_folder=output_path,
-                    side2_shifts=side2_shifts, side1_shifts=side1_shifts, image_zarr1=image_zarr1, image_zarr2=image_zarr2)
+            result = integrate_fluorescence(t, image_zarr=image_zarr, mask_zarr=mask_zarr, fluo_channel=fluo_channel, out_folder=output_path)
             results.append(result)
 
     return True
