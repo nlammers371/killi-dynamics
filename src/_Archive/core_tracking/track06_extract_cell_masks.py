@@ -195,7 +195,7 @@ def extract_cell_masks(root, project_name, config_name, par_flag=False, overwrit
     #                                  np.reshape(x_ref_snip_i, (x_ref_snip_i.size, 1))), axis=1)
 
     morph_fp = disk(2)
-    # load track and segment info
+    # load track and run02_segment info
     # cfg = load_config(os.path.join(root, "metadata", project_name, config_name))
     # tracks_df, graph = to_tracks_layer(cfg)
     tracks_df = pd.read_csv(os.path.join(read_directory, "tracks.csv"))

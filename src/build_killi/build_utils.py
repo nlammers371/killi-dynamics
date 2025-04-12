@@ -458,7 +458,7 @@ def transfer_fluorescence(frame_i, fluo_df, tracked_mask_zarr, mask_zarr, start_
         fluo_vec[p] = np.dot(weights, fluo_vals)
 
     temp_df = pd.DataFrame(label_vec, columns=["track_id"])
-    temp_df["t"] = frame_i
+    temp_df["t"] = frame_i - start_i
     temp_df["mean_fluo"] = fluo_vec
 
     return temp_df

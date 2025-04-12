@@ -39,7 +39,7 @@ for t, time_point in enumerate(tqdm(time_points)):
     data_tzyx[t, :, :, :] = data_zyx
 
 
-# segment
+# run02_segment
 start = time.time()
 detection = np.empty(data_tzyx.shape, dtype=np.uint)
 array_apply(

@@ -131,7 +131,7 @@ def cellpose_segmentation(
         component = "some_plate.zarr/B/03/0"
         metadata = {"num_levels": 4, "coarsening_xy": 2}
 
-    :param data_directory: path to directory containing zarr folders for images to segment
+    :param data_directory: path to directory containing zarr folders for images to run02_segment
     :param seg_channel_label: Identifier of a channel based on its label (e.g.
                           ``DAPI``). If not ``None``, then ``wavelength_id``
                           must be ``None``.
@@ -203,7 +203,7 @@ def cellpose_segmentation(
     prob_zarr = zarr.open(prob_zarr_path, mode='a', shape=data_tzyx.shape, dtype=np.float32,
                           chunks=(1,) + data_tzyx.shape[1:])
 
-    # determine which indices to segment
+    # determine which indices to run02_segment
     print("Determining which time points need stitching...")
     if overwrite | (not prev_flag):
         write_indices = np.arange(n_time_points)
@@ -212,7 +212,7 @@ def cellpose_segmentation(
         # n_from = data_tzyx.nchunks_initialized
         # write_indices = np.arange(n_to, n_from)
         write_indices = []
-        for t in tqdm(range(n_time_points), "Checking which frames to segment..."):
+        for t in tqdm(range(n_time_points), "Checking which frames to run02_segment..."):
             nz_flag_to = np.any(prob_zarr[t, :, :, :] != 0)
             if not nz_flag_to:     # if the cellpose output is all zeros
                 nz_flag_from = np.any(data_tzyx[t, :, :, :] != 0)

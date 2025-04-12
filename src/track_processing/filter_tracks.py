@@ -81,7 +81,7 @@ tracks_df_v["v"] = np.sqrt(tracks_df_v["dx"]**2 + tracks_df_v["dy"]**2 + tracks_
 tracks_df_v = tracks_df_v.drop(labels=["dV", "id", "parent_id"], axis=1).dropna()
 tracks_df_v = tracks_df_v.groupby(["track_id", "parent_track_id"]).mean().reset_index()
 
-# fit a 2-component GMM to segment EVL from deep cells
+# fit a 2-component GMM to run02_segment EVL from deep cells
 vv_array = tracks_df_v[["volume", "v"]].to_numpy()
 vv_array = vv_array - np.mean(vv_array, axis=0)
 vv_array = np.divide(vv_array, np.percentile(np.abs(vv_array), 95, axis=0))

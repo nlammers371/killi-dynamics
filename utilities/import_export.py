@@ -48,7 +48,7 @@ def export_segmentation_generic(
     export_func: Callable[[int, np.ndarray], None],
 ) -> None:
     """
-    Generic function to export segmentation masks, segments labeled by `track_id` from `df`.
+    Generic function to run01_export segmentation masks, segments labeled by `track_id` from `df`.
 
     Parameters
     ----------

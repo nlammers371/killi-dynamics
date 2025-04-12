@@ -158,7 +158,7 @@ def cellpose_segmentation(
         component = "some_plate.zarr/B/03/0"
         metadata = {"num_levels": 4, "coarsening_xy": 2}
 
-    :param raw_directory: path to directory containing zarr folders for images to segment
+    :param raw_directory: path to directory containing zarr folders for images to run02_segment
     :param seg_channel_label: Identifier of a channel based on its label (e.g.
                           ``DAPI``). If not ``None``, then ``wavelength_id``
                           must be ``None``.

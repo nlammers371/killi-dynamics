@@ -46,7 +46,7 @@ def refine_cell_masks(root, project_name, config_name, overwrite_flag=False, mot
     if not os.path.isdir(im_directory_refined):
         os.makedirs(im_directory_refined)
 
-    # load track and segment info
+    # load track and run02_segment info
     # cfg = load_config(os.path.join(root, "metadata", project_name, config_name))
     # tracks_df, graph = to_tracks_layer(cfg)
     tracks_df = pd.read_csv(os.path.join(root, "built_data", "tracking", project_name, tracking_folder, "tracks_cleaned.csv"))

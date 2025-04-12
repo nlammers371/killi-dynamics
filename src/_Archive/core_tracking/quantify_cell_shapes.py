@@ -53,7 +53,7 @@ def extract_cell_shape_stats(root, project_name, config_name, motion_orient_flag
     #                                       range(snip_dim),
     #                                       indexing="ij")
 
-    # load track and segment info
+    # load track and run02_segment info
 
     # segments = zarr.open(os.path.join(tracking_directory, "segments.zarr"), mode='r')
     tracks_df = pd.read_csv(os.path.join(tracking_directory, "tracks_cleaned.csv"))
