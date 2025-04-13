@@ -14,7 +14,7 @@ if __name__ == "__main__":
     prefix = f"E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\tracking\\{project_name}\\{tracking_config}\\well0000\\"
     track_folder1 = prefix + f"track_{track_range1[0]:04}_{track_range1[1]:04}\\"
     track_folder2 = prefix + f"track_{track_range2[0]:04}_{track_range2[1]:04}\\"
-    out_folder = prefix + f"track_{track_range1[0]:04}_{track_range2[1]:04}\\"
+    out_folder = prefix + f"track_{track_range1[0]:04}_{track_range2[1]:04}_cb\\"
 
     print("Combining tracking results for project:", project_name)
     concatenate_tracking_results(track_folder1=track_folder1, track_folder2=track_folder2, out_folder=out_folder,

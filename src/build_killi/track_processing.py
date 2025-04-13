@@ -15,29 +15,17 @@ from tqdm.contrib.concurrent import process_map
 import multiprocessing
 from dask.diagnostics import ProgressBar
 from src.nucleus_dynamics.tracking.perform_tracking import reindex_mask
-from scipy import ndimage as ndi
 
-def props_integrate(frame, mask_zarr, im_zarr, fluo_channel, tracks_df, start_i):
+def props_integrate(frame, mask_zarr, im_zarr, fluo_channel, tracks_df, start_i, scale_vec):
 
-    props = regionprops_table(mask_zarr[frame], intensity_image=im_zarr[frame + start_i, fluo_channel],
-        properties=('label', 'intensity_mean'),
+    mask_frame = mask_zarr[frame]
+    im_frame = im_zarr[frame + start_i, fluo_channel]
+
+    props = regionprops_table(mask_frame, intensity_image=im_frame, spacing=scale_vec,
+        properties=('label', 'intensity_mean', "area"),
     )
-    props_df = pd.DataFrame(props).rename(columns={'label':'track_id', 'intensity_mean': 'fluo_mean'})
-
-    # alt option
-    # props2 = regionprops(mask_zarr[frame])
-    # fluo_vec = np.zeros((len(props2),), dtype=np.float32)
-    # im_frame = im_zarr[frame + start_i, fluo_channel]
-    # for p, prop in enumerate(tqdm(props2)):
-    #     lb = prop.label
-    #     coords = prop.coords
-    #     fluo_vec[p] = np.mean(im_frame[coords[:, 0], coords[:, 1], coords[:, 2]])
+    props_df = pd.DataFrame(props).rename(columns={'label':'track_id', 'intensity_mean': 'fluo_mean', 'area': 'nucleus_volume'})
     frame_df = tracks_df.loc[tracks_df["t"] == frame, :]
-
-    # labels_to_integrate = np.unique(frame_df["track_id"].values)
-    # mf = ndi.mean(im_zarr[frame + start_i, fluo_channel], labels=mask_zarr[frame])
-    # frame
-
     frame_df = frame_df.merge(props_df, how="left", on="track_id")
 
     return frame_df
@@ -67,6 +55,9 @@ def track_fluorescence_wrapper(root, project_name, tracking_config, suffix="", w
 
     if use_marker_masks:
         project_name += "_marker"
+
+    scale_vec = tuple(
+        [image_zarr.attrs['PhysicalSizeZ'],image_zarr.attrs['PhysicalSizeY'], image_zarr.attrs['PhysicalSizeX']])
 
     # set output path for tracking results
     project_path = os.path.join(root, "tracking", project_name, tracking_name, f"well{well_num:04}", "")
@@ -113,7 +104,7 @@ def track_fluorescence_wrapper(root, project_name, tracking_config, suffix="", w
         write_indices = np.arange(seg_zarr.shape[0])
 
     fluo_run = partial(props_integrate, mask_zarr=seg_zarr, im_zarr=image_zarr, fluo_channel=fluo_channel,
-                       tracks_df=tracks_df, start_i=start_i)
+                       tracks_df=tracks_df, start_i=start_i, scale_vec=scale_vec)
     if par_flag:
         print("Using parallel processing")
         # Use process_map for parallel processing
@@ -126,7 +117,7 @@ def track_fluorescence_wrapper(root, project_name, tracking_config, suffix="", w
         print("Using sequential processing")
         # Sequential processing
         df_list = []
-        for t in tqdm(write_indices):
+        for t in tqdm([200]): #write_indices):
             df = fluo_run(t)
             df_list.append(df)
 
@@ -150,14 +141,16 @@ def concatenate_tracking_results(track_folder1, track_folder2, out_folder, track
         # Limit yourself to 33% of CPUs (rounded down, at least 1)
         n_workers = max(1, total_cpus // 3)
 
+    # make out directory
+    os.makedirs(out_folder, exist_ok=True)
     # tracking_name = tracking_config.replace(".txt", "")
 
     start_i1, stop_i1 = track_range1[0], track_range2[1]
     start_i2, stop_i2 = track_range2[0], track_range2[1]
 
     stitch_suffix = ""
-    if os.path.isfile(os.path.join(track_folder1, "segments_stitched.zarr")) & \
-        os.path.isfile(os.path.join(track_folder1, "segments_stitched.zarr")):
+    if os.path.isdir(os.path.join(track_folder1, "segments_stitched.zarr")) & \
+        os.path.isdir(os.path.join(track_folder1, "segments_stitched.zarr")):
         stitch_suffix = "_stitched"
 
     # load tracking masks
@@ -166,8 +159,8 @@ def concatenate_tracking_results(track_folder1, track_folder2, out_folder, track
 
     # load tracking DFs
     fluo_suffix = ""
-    if os.path.isfile(os.path.join(track_folder1, "segments_stitched.zarr")) & \
-            os.path.isfile(os.path.join(track_folder1, "segments_stitched.zarr")):
+    if os.path.isfile(os.path.join(track_folder1, f"tracks{stitch_suffix}_fluo.csv")) & \
+            os.path.isfile(os.path.join(track_folder1, f"tracks{stitch_suffix}_fluo.csv")):
         fluo_suffix = "_fluo"
     tracks_df1 = pd.read_csv(os.path.join(track_folder1, "tracks" + stitch_suffix + fluo_suffix + ".csv"))
     tracks_df2 = pd.read_csv(os.path.join(track_folder2, "tracks" + stitch_suffix + fluo_suffix + ".csv"))
@@ -177,6 +170,9 @@ def concatenate_tracking_results(track_folder1, track_folder2, out_folder, track
     hi_rel2 = handoff_index - start_i2
     ref_frame1 = seg_zarr1[hi_rel1]  # get the reference frame from the first run02_segment
     ref_frame2 = seg_zarr2[hi_rel2]  # get the reference frame from the second run02_segment
+
+    # tracks_df1_s = pd.read_csv(os.path.join(track_folder1, "tracks" + stitch_suffix + ".csv"))
+    # tracks_df2_s = pd.read_csv(os.path.join(track_folder2, "tracks" + stitch_suffix + ".csv"))
 
     ###########
     # First look for masks that can be merged

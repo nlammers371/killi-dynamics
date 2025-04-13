@@ -14,11 +14,10 @@ if __name__ == "__main__":
     # script to stitch tracks after initial tracking. Also updates corresponding seg_zarr's
     # At this point, should have tracked all relevant experiments
 
-
     # load zarr image file
     root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\"
 
-    project_name_list = [ "20250311_LCP1-NLSMSC", "20250311_LCP1-NLSMSC_marker", "20250311_LCP1-NLSMSC"]#, "20250311_LCP1-NLSMSC", "20250311_LCP1-NLSMSC_marker"]
+    project_name_list = ["20250311_LCP1-NLSMSC", "20250311_LCP1-NLSMSC_marker", "20250311_LCP1-NLSMSC"]#, "20250311_LCP1-NLSMSC", "20250311_LCP1-NLSMSC_marker"]
     track_range_list = ["track_2000_2339", "track_1200_2339", "track_0000_2200"]#, "track_2000_2339", "track_1200_2339"]
     track_config_list = ["tracking_20250328_redux", "tracking_20250328_redux", "tracking_20250328_redux"]#, "tracking_20250328_redux", "tracking_20250328_redux"]
 
@@ -27,7 +26,7 @@ if __name__ == "__main__":
     max_radius = 25
     scale_vec = np.asarray([3.0, 1.0, 1.0])
     n_workers = 12
-    overwrite = False
+    overwrite = True
 
     for i in tqdm(range(len(project_name_list)), desc="Processing projects", unit="project"):
 
@@ -63,6 +62,7 @@ if __name__ == "__main__":
         else:
             write_indices = empty_indices
 
+        print("Copying indices.") #, write_indices)
         run_copy = partial(copy_zarr, src=seg_zarr, dst=seg_zarr_stitched)
         process_map(run_copy, write_indices, max_workers=n_workers, chunksize=1)
 
@@ -75,20 +75,23 @@ if __name__ == "__main__":
         tracks_df_stitched = close_tracks_gaps(tracks_df, max_gap=max_gap, max_radius=max_radius, scale=scale_vec)
 
         # get map from old IDS to new IDS
-        map_df = tracks_df[["t", "track_id"]]
+        map_df = tracks_df[["t", "track_id", "id"]].copy()
         map_df = map_df.rename(columns={"track_id": "old_track_id"})
-        map_df["new_track_id"] = tracks_df_stitched["track_id"]
-        map_df.reset_index(drop=True, inplace=True)
+        map_df = map_df.merge(tracks_df_stitched[["t", "track_id", "id"]].drop_duplicates(), on=["t", "id"], how="left")
+        check_df = map_df.loc[:, ["old_track_id"]].drop_duplicates()
+        map_df = map_df.loc[:, ["track_id", "old_track_id"]].drop_duplicates().reset_index(drop=True)
+        if map_df.shape[0] != check_df.shape[0]:
+            raise ValueError("Degenerate old -> new mappings found in map_df")
 
         # relabel frames that come from tracks2
         max_label = np.max(map_df["old_track_id"])
         # Create an identity lookup table (i.e. each label maps to itself)
-        lookup = np.arange(max_label + 1, dtype=seg_zarr.dtype)
+        lookup = np.zeros((max_label+1,))  #np.arange(max_label + 1, dtype=seg_zarr.dtype)
 
         # Update the lookup table with your mapping.
-        for row, old_label in enumerate(map_df["old_track_id"]):
+        for _, row in map_df.iterrows():
             # It's assumed that old_label is within [0, max_label]
-            lookup[old_label] = map_df.loc[row, "new_track_id"]
+            lookup[row["old_track_id"]] = row["track_id"]
 
         # reindex
         print("Reindexing segments...")
