@@ -11,15 +11,13 @@ if __name__ == "__main__":
     root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\"
 
     project_name_list = ["20250311_LCP1-NLSMSC", "20250311_LCP1-NLSMSC", "20250311_LCP1-NLSMSC"]  #, "20250311_LCP1-NLSMSC", "20250311_LCP1-NLSMSC_marker"]
-    use_marker_list = [False, True, False]  #, False, True]
-    track_range_list = [[2000, 2339], [1200, 2339], [0, 2200]]  #"track_2000_2339", "track_1200_2339", "track_0000_2200"]#, "track_2000_2339", "track_1200_2339"]
-    track_config_list = ["tracking_20250328_redux", "tracking_20250328_redux", "tracking_20250328_redux"]  #, "tracking_20250328_redux", "tracking_20250328_redux"]
+    use_marker_list = [False, False]  #, False, True]
+    track_range_list = [[2000, 2339], [0, 2200]]  #"track_2000_2339", "track_1200_2339", "track_0000_2200"]#, "track_2000_2339", "track_1200_2339"]
+    track_config_list = ["tracking_20250328_redux",  "tracking_20250328_redux"]  #, "tracking_20250328_redux", "tracking_20250328_redux"]
     overwrite = True
     par_flag = True
-    # set gap closing parameters
-    # overwrite = False
 
-    for i in tqdm([2], desc="Processing projects", unit="project"): # range(len(project_name_list[2])
+    for i in tqdm(range(len(project_name_list)), desc="Processing projects", unit="project"): # range(len(project_name_list[2])
 
         project_name = project_name_list[i]
         tracking_config = track_config_list[i]

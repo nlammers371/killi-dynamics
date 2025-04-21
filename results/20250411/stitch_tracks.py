@@ -17,13 +17,13 @@ if __name__ == "__main__":
     # load zarr image file
     root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\"
 
-    project_name_list = ["20250311_LCP1-NLSMSC", "20250311_LCP1-NLSMSC_marker", "20250311_LCP1-NLSMSC"]#, "20250311_LCP1-NLSMSC", "20250311_LCP1-NLSMSC_marker"]
-    track_range_list = ["track_2000_2339", "track_1200_2339", "track_0000_2200"]#, "track_2000_2339", "track_1200_2339"]
+    project_name_list = ["20250311_LCP1-NLSMSC", "20250311_LCP1-NLSMSC", "20250311_LCP1-NLSMSC_marker"]#, "20250311_LCP1-NLSMSC", "20250311_LCP1-NLSMSC_marker"]
+    track_range_list = ["track_2000_2339", "track_0000_2200", "track_1200_2339"]#, "track_2000_2339", "track_1200_2339"]
     track_config_list = ["tracking_20250328_redux", "tracking_20250328_redux", "tracking_20250328_redux"]#, "tracking_20250328_redux", "tracking_20250328_redux"]
 
     # set gap closing parameters
     max_gap = 3
-    max_radius = 25
+    max_radius = 25 * np.sqrt(max_gap)
     scale_vec = np.asarray([3.0, 1.0, 1.0])
     n_workers = 12
     overwrite = True

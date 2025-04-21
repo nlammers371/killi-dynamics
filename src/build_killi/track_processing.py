@@ -33,16 +33,7 @@ def props_integrate(frame, mask_zarr, im_zarr, fluo_channel, tracks_df, start_i,
 # define wrapper function for parallel processing
 def track_fluorescence_wrapper(root, project_name, tracking_config, suffix="", well_num=0, start_i=0, fluo_channel=None,
                                overwrite=False, par_flag=False, stop_i=None, use_marker_masks=False, use_fused=True,
-                               n_workers=None):
-
-    # get path to zarr file
-    # if well_num is not None:
-    #     file_prefix = project_name + f"_well{well_num:04}"
-    #     subfolder = project_name
-    # else:
-    #     file_prefix = project_name
-    #     subfolder = ""
-    #     well_num = 0
+                               n_workers=None, use_stitched_flag=False):
 
     # get name
     tracking_name = tracking_config.replace(".txt", "")
@@ -76,9 +67,7 @@ def track_fluorescence_wrapper(root, project_name, tracking_config, suffix="", w
     # load tracking masks
     label_path = os.path.join(project_sub_path, "segments.zarr")
     label_path_s = os.path.join(project_sub_path, "segments_stitched.zarr")
-    use_stitched_flag = False
-    if os.path.exists(label_path_s):
-        use_stitched_flag = True
+    if use_stitched_flag:
         label_path = label_path_s
     seg_zarr = zarr.open(label_path, mode="r")
 
@@ -117,7 +106,7 @@ def track_fluorescence_wrapper(root, project_name, tracking_config, suffix="", w
         print("Using sequential processing")
         # Sequential processing
         df_list = []
-        for t in tqdm([200]): #write_indices):
+        for t in tqdm(write_indices):
             df = fluo_run(t)
             df_list.append(df)
 
@@ -130,8 +119,9 @@ def track_fluorescence_wrapper(root, project_name, tracking_config, suffix="", w
 
 
 # Note: this assumes that the two tracking results contain predominanty the same objects. Will not work well otherwise
-def concatenate_tracking_results(track_folder1, track_folder2, out_folder, track_range1, track_range2, handoff_index=None,
-                                    par_flag=False, n_workers=None, overwrite_flag=False):
+def concatenate_tracking_results(track_folder1, track_folder2, out_folder, track_range1, track_range2,
+                                 handoff_index=None, par_flag=False, n_workers=None, overwrite_flag=False,
+                                 stitch_suffix=""):
 
     if handoff_index is None:
         handoff_index = track_range2[0]  # default to end of first range
@@ -148,10 +138,10 @@ def concatenate_tracking_results(track_folder1, track_folder2, out_folder, track
     start_i1, stop_i1 = track_range1[0], track_range2[1]
     start_i2, stop_i2 = track_range2[0], track_range2[1]
 
-    stitch_suffix = ""
-    if os.path.isdir(os.path.join(track_folder1, "segments_stitched.zarr")) & \
-        os.path.isdir(os.path.join(track_folder1, "segments_stitched.zarr")):
-        stitch_suffix = "_stitched"
+    # stitch_suffix = ""
+    # if os.path.isdir(os.path.join(track_folder1, "segments_stitched.zarr")) & \
+    #     os.path.isdir(os.path.join(track_folder1, "segments_stitched.zarr")):
+        # stitch_suffix = "_stitched"
 
     # load tracking masks
     seg_zarr1 = zarr.open(os.path.join(track_folder1, "segments" + stitch_suffix + ".zarr"), mode="r")
@@ -183,10 +173,6 @@ def concatenate_tracking_results(track_folder1, track_folder2, out_folder, track
 
     label_vec1 = np.array([prop.label for prop in props1])  # labels in the first frame
     label_vec2 = np.array([prop.label for prop in props2])
-
-    # area_vec1 = np.array([prop.area for prop in props1])  # area of the labels in the first frame
-    # area_vec2 = np.array([prop.area for prop in props2])  # area of the labels in the second frame
-    # labels in the second frame
 
     mask_overlap_array = np.zeros((len(props1), len(props2)), dtype=np.int32)
     for i, prop2 in enumerate(tqdm(props2)):
@@ -260,10 +246,10 @@ def concatenate_tracking_results(track_folder1, track_folder2, out_folder, track
 
     # combine tracks
     tracks_df_cb = pd.concat([tracks_df1_new, tracks_df2_new], ignore_index=True)
-    tracks_df_cb.to_csv(os.path.join(out_folder, "tracks.csv"), index=False)
+    tracks_df_cb.to_csv(os.path.join(out_folder,  "tracks" + stitch_suffix + fluo_suffix + ".csv"), index=False)
 
     # create new segments zarr for combined results
-    combined_seg_zarr_path = os.path.join(out_folder, "segments.zarr")
+    combined_seg_zarr_path = os.path.join(out_folder, "segments" + stitch_suffix + ".zarr")
 
     # Wrap them as Dask arrays. (Assuming their chunk sizes are already appropriate.)
     da1 = da.from_array(seg_zarr1, seg_zarr1.chunks)

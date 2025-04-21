@@ -3,8 +3,8 @@ import plotly.graph_objects as go
 import math
 
 
-def format_2d_plotly(fig, axis_labels=None, font_size=14, marker_size=6,
-                     theme="dark", dims=None, title="", show_gridlines=True):
+def format_2d_plotly(fig, axis_labels=None, font_size=14, marker_size=6, no_markers=False,
+                     theme="dark", dims=None, title="", show_gridlines=True, marker_lines=True):
     """
     Format a 2D Plotly figure (scatter plot) with consistent styling.
 
@@ -14,38 +14,42 @@ def format_2d_plotly(fig, axis_labels=None, font_size=14, marker_size=6,
       font_size (int): Global font size.
       marker_size (int): Marker size for traces.
       theme (str): "dark" or "light".
-      dims (list): [height, width] for the figure (default: [600, 800]).
+      dims (list): [height, width] for the figure (default: [600, 1000]).
       title (str): Plot title.
 
     Returns:
       A formatted Plotly figure.
     """
+    # Default dimensions
     if dims is None:
         dims = [600, 1000]
+    # Theme colors
     if theme == "dark":
         line_color = "white"
         text_color = "white"
         bk_color = "black"
-    elif theme == "light":
-        line_color = "black"
-        text_color = "black"
-        bk_color = "white"
     else:
         line_color = "black"
         text_color = "black"
         bk_color = "white"
 
+    # Axis labels default
     if axis_labels is None:
         axis_labels = ["", ""]
 
-    # Update marker settings for all traces.
-    fig.update_traces(marker=dict(size=marker_size,
-                                  line=dict(color=line_color, width=1)))
+    # Marker adjustments: only for traces that support markers
+    for trace in fig.data:
+        if hasattr(trace, 'marker') & ~no_markers:
+            if marker_lines:
+                trace.marker.size = marker_size
+                trace.marker.line = dict(color=line_color, width=1)
+            else:
+                trace.marker.size = marker_size
 
-    # Compute a slightly smaller tick font size.
-    tick_font_size = font_size#int(font_size * 6 / 7)
+    # Compute tick font size
+    tick_font_size = font_size  # or adjust as needed
 
-    # Create a dictionary for axis formatting (for 2D, do not include 'showbackground').
+    # Axis formatting dict
     axis_format_dict = dict(
         showgrid=show_gridlines,
         zeroline=True,
@@ -55,23 +59,21 @@ def format_2d_plotly(fig, axis_labels=None, font_size=14, marker_size=6,
         tickfont=dict(size=tick_font_size)
     )
 
-    # Create separate dictionaries for x- and y-axes with titles.
+    # X and Y axis dicts with titles
     xaxis_format = axis_format_dict.copy()
-    xaxis_format["title"] = axis_labels[0]
+    xaxis_format['title'] = axis_labels[0]
     yaxis_format = axis_format_dict.copy()
-    yaxis_format["title"] = axis_labels[1]
+    yaxis_format['title'] = axis_labels[1]
 
-    # Check if axis ranges have been manually specified.
-    x_range = fig.layout.xaxis.range if fig.layout.xaxis and fig.layout.xaxis.range else None
-    y_range = fig.layout.yaxis.range if fig.layout.yaxis and fig.layout.yaxis.range else None
+    # Check for manual axis ranges
+    x_range = fig.layout.xaxis.range if hasattr(fig.layout, 'xaxis') else None
+    y_range = fig.layout.yaxis.range if hasattr(fig.layout, 'yaxis') else None
 
     if x_range is not None and y_range is not None:
-        # Calculate extents.
         x_extent = x_range[1] - x_range[0]
         y_extent = y_range[1] - y_range[0]
-        # Set up equal scaling using scaleanchor and scaleratio.
         fig.update_layout(
-            xaxis=dict(**xaxis_format, range=x_range, scaleanchor="y", scaleratio=x_extent / y_extent),
+            xaxis=dict(**xaxis_format, range=x_range, scaleanchor='y', scaleratio=x_extent / y_extent),
             yaxis=dict(**yaxis_format, range=y_range)
         )
     else:
@@ -80,7 +82,7 @@ def format_2d_plotly(fig, axis_labels=None, font_size=14, marker_size=6,
             yaxis=yaxis_format
         )
 
-    # Set overall layout parameters.
+    # General layout settings
     fig.update_layout(
         width=dims[1],
         height=dims[0],
@@ -90,134 +92,125 @@ def format_2d_plotly(fig, axis_labels=None, font_size=14, marker_size=6,
         paper_bgcolor=bk_color
     )
 
+    # Remove error bars if present
     try:
         fig.update_traces(
-            error_x=dict(color="white", width=0),
-            error_y=dict(color="white", width=0)
+            error_x=dict(color=line_color, width=0),
+            error_y=dict(color=line_color, width=0)
         )
-    except:
+    except Exception:
         pass
 
-    if any(hasattr(trace, "marker") and getattr(trace, "showlegend", True)
+    # Adjust colorbar position if legends present
+    if any(hasattr(trace, 'marker') and getattr(trace, 'showlegend', True)
            for trace in fig.data):
-        # Update the colorbar to be positioned in the bottom half of the y axis
         fig.update_layout(
-            coloraxis_colorbar=dict(
-                x=1,  # move the colorbar to the right edge
-                y=0,  # position lower (bottom half)
-                len=0.5,  # adjust the length as needed
-                yanchor="bottom",
-            )
+            coloraxis_colorbar=dict(x=1, y=0, len=0.5, yanchor='bottom')
         )
     else:
-        fig.update_layout(width=dims[1], height=dims[0],
-                          title=title,
-                          coloraxis_colorbar=dict(
-                              x=1,  # Increase x to move the colorbar rightwards
-                              y=0.5,  # Center vertically (default is often around 0.5)
-                              len=0.5  # Adjust the length if needed
-                          ))
+        fig.update_layout(
+            coloraxis_colorbar=dict(x=1, y=0.5, len=0.5)
+        )
 
     return fig
 
-def format_3d_plotly(fig, axis_labels=None, font_size=14, marker_size=6, show_gridlines=True,
-                     aspectmode="data", eye=None, theme="dark", dims=None, title=""):
+def format_3d_plotly(fig, axis_labels=None, font_size=14, marker_size=6, show_gridlines=True, hide_axes=False,
+                     aspectmode="data", eye=None, theme="dark", dims=None, title="", marker_lines=True):
+    """
+    Apply consistent 3D formatting to a Plotly figure. Only adjusts markers on traces that support them.
+    """
+    import math
+    import plotly.graph_objects as go
 
+    # Default dimensions
     if dims is None:
         dims = [600, 800]
+    # Theme colors
     if theme == "dark":
         line_color = "white"
         text_color = "white"
         bk_color = "black"
-    elif theme == "light":
+    else:
         line_color = "black"
         text_color = "black"
         bk_color = "white"
 
+    # Axis labels default
     if axis_labels is None:
         axis_labels = ["", "", ""]
-
+    # Camera default
     if eye is None:
         eye = dict(x=1.5, y=1.5, z=1.5)
 
-    fig.update_traces(marker=dict(size=marker_size, line=dict(color=line_color, width=1)))
+    # Marker adjustments: only for traces with a marker attribute
+    for trace in fig.data:
+        if hasattr(trace, 'marker'):
+            if marker_lines:
+                trace.marker.size = marker_size
+                trace.marker.line = dict(color=line_color, width=1)
+            else:
+                trace.marker.size = marker_size
 
+    # Tick font size
     tick_font_size = int(font_size * 6 / 7)
-    axis_format_dict = dict(showbackground=False,
-                            showgrid=show_gridlines,
-                            zeroline=True,
-                            gridcolor=line_color,
-                            linecolor=line_color,
-                            zerolinecolor=line_color,
-                            tickfont=dict(size=tick_font_size))
+    axis_format = dict(
+        showbackground=False,
+        visible=not hide_axes,
+        showgrid=show_gridlines,
+        zeroline=True,
+        gridcolor=line_color,
+        linecolor=line_color,
+        zerolinecolor=line_color,
+        tickfont=dict(size=tick_font_size)
+    )
+    # Create a copy for each axis and assign titles
+    dict_list = []
+    for i, label in enumerate(axis_labels):
+        d = axis_format.copy()
+        d['title'] = label
+        dict_list.append(d)
 
-    dict_list = [axis_format_dict.copy(), axis_format_dict.copy(), axis_format_dict.copy()]
-    for i, d in enumerate(dict_list):
-        d["title"] = axis_labels[i]
-
-    # check to see if axis ranges have been manually specified
-    # Get the ranges
-
+    # Handle axis ranges and aspect ratio
+    scene_kwargs = {}
     x_range = fig.layout.scene.xaxis.range
     y_range = fig.layout.scene.yaxis.range
     z_range = fig.layout.scene.zaxis.range
-
     if x_range is not None:
-        # Calculate the extents (difference between max and min)
-        x_extent = x_range[1] - x_range[0]
-        y_extent = y_range[1] - y_range[0]
-        z_extent = z_range[1] - z_range[0]
-
-        fig.update_layout(scene=dict(aspectmode="manual",
-                                     aspectratio=dict(x=x_extent, y=y_extent, z=z_extent),
-                                     xaxis=dict_list[0],
-                                     yaxis=dict_list[1],
-                                     zaxis=dict_list[2]
-                                     ))
-
+        x_ext = x_range[1] - x_range[0]
+        y_ext = y_range[1] - y_range[0]
+        z_ext = z_range[1] - z_range[0]
+        max_ext = max(x_ext, y_ext, z_ext, 1e-9)
+        ar = dict(x=x_ext/max_ext, y=y_ext/max_ext, z=z_ext/max_ext)
+        dict_list[0]['range'] = x_range
+        dict_list[1]['range'] = y_range
+        dict_list[2]['range'] = z_range
+        scene_kwargs['aspectmode'] = 'manual'
+        scene_kwargs['aspectratio'] = ar
     else:
-        fig.update_layout(scene=dict(aspectmode=aspectmode,
-                                     xaxis=dict_list[0],
-                                     yaxis=dict_list[1],
-                                     zaxis=dict_list[2]
-                          ))
+        scene_kwargs['aspectmode'] = aspectmode
+    scene_kwargs['xaxis'] = dict_list[0]
+    scene_kwargs['yaxis'] = dict_list[1]
+    scene_kwargs['zaxis'] = dict_list[2]
 
-    # Check if any trace with a marker has its legend shown
+    # Apply scene settings
+    fig.update_layout(scene=scene_kwargs)
 
-
+    # General layout
     fig.update_layout(
         font=dict(color=text_color, family="Arial, sans-serif", size=font_size),
-        plot_bgcolor=bk_color,  # Background inside the plotting area
-        paper_bgcolor=bk_color  # Background outside the plotting area (around the plot)
+        plot_bgcolor=bk_color,
+        paper_bgcolor=bk_color,
+        scene_camera=dict(eye=eye),
     )
-
-    fig.update_layout(
-        scene_camera=dict(
-            eye=eye  # Adjust these values as needed.
-        )
-    )
-
-    if any(hasattr(trace, "marker") and getattr(trace, "showlegend", True)
-           for trace in fig.data):
-        # Update the colorbar to be positioned in the bottom half of the y axis
-        fig.update_layout(
-            coloraxis_colorbar=dict(
-                x=1,  # move the colorbar to the right edge
-                y=0,  # position lower (bottom half)
-                len=0.5,  # adjust the length as needed
-                yanchor="bottom",
-            )
-        )
+    # Colorbar positioning if legends present
+    if any(getattr(trace, 'showlegend', True) for trace in fig.data if hasattr(trace, 'marker')):
+        fig.update_layout(coloraxis_colorbar=dict(x=1, y=0, len=0.5, yanchor='bottom'))
     else:
-        fig.update_layout(width=dims[1], height=dims[0],
-                      title=title,
-                      coloraxis_colorbar=dict(
-                          x=1,  # Increase x to move the colorbar rightwards
-                          y=0.5,  # Center vertically (default is often around 0.5)
-                          len=0.5  # Adjust the length if needed
-                      ))
+        fig.update_layout(width=dims[1], height=dims[0], title=title,
+                          coloraxis_colorbar=dict(x=1, y=0.5, len=0.5))
 
     return fig
+
 
 
 def rotate_figure(fig, zoom_factor=1.0, z_rotation=0, elev_rotation=0):
@@ -246,34 +239,33 @@ def rotate_figure(fig, zoom_factor=1.0, z_rotation=0, elev_rotation=0):
     except Exception:
         x, y, z = 1.25, 1.25, 1.25
 
-    # Apply zoom: scale each coordinate by zoom_factor.
-    # (A zoom_factor < 1 moves the camera closer (zoom in), > 1 moves it away.)
-    x /= zoom_factor
-    y /= zoom_factor
-    z /= zoom_factor
+    # --- 1) original camera vector
+    #    (x,y,z) is your input eye position before zooming
+    orig_r = math.sqrt(x * x + y * y + z * z)
+    if orig_r == 0:
+        raise ValueError("Original eye at the origin is invalid")
 
-    # Convert the eye position to spherical coordinates.
-    r = math.sqrt(x ** 2 + y ** 2 + z ** 2)
-    theta = math.atan2(y, x)  # azimuth angle in the x-y plane.
-    # phi is the polar angle from the positive z-axis.
-    phi = math.acos(z / r) if r != 0 else 0
+    # --- 2) decide your zoomed radius
+    zoomed_r = orig_r / zoom_factor
 
-    # Apply rotation about the z axis by adjusting the azimuth (theta).
-    theta += math.radians(z_rotation)
+    # --- 3) get the original direction unit‐vector angles
+    dx, dy, dz = x / orig_r, y / orig_r, z / orig_r
+    theta = math.atan2(dy, dx)  # azimuth in [–π,π]
+    phi = math.acos(max(-1, min(1, dz)))  # polar angle in [0,π]
 
-    # Apply elevation rotation by adjusting the polar angle (phi).
+    # --- 4) apply your desired rotations
+    theta += math.radians(z_rotation)  # spin around z
     phi += math.radians(elev_rotation)
-    # Clamp phi to be between 0 and pi.
-    phi = max(0, min(math.pi, phi))
+    phi = max(0, min(math.pi, phi))  # clamp to [0,π]
 
-    # Convert back to Cartesian coordinates.
-    new_x = r * math.sin(phi) * math.cos(theta)
-    new_y = r * math.sin(phi) * math.sin(theta)
-    new_z = r * math.cos(phi)
+    # --- 5) reconstruct with the *fixed* zoomed radius
+    new_x = zoomed_r * math.sin(phi) * math.cos(theta)
+    new_y = zoomed_r * math.sin(phi) * math.sin(theta)
+    new_z = zoomed_r * math.cos(phi)
 
-    # Update the camera in the figure.
+    # --- 6) update Plotly’s camera
     new_camera = {"eye": {"x": new_x, "y": new_y, "z": new_z}}
-    fig.update_layout(scene_camera=new_camera)
+    fig.update_layout(scene=dict(camera=new_camera))
 
     return fig
 
