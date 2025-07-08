@@ -67,9 +67,9 @@ if __name__ == "__main__":
     print("Initializing napari...")
     viewer = napari.Viewer()
     if not mip_flag:
-        viewer.add_image(fused_image_zarr, channel_axis=1, scale=scale_vec, colormap=["cyan", "gray"], visible=False, contrast_limits=[(0, 500), (0, 2500)])
+        viewer.add_image(fused_image_zarr, channel_axis=1, scale=scale_vec, colormap=["cyan", "gray"], visible=False, contrast_limits=[(50, 300), (0, 2500)])
     else:
-        viewer.add_image(mip_zarr, channel_axis=1, scale=scale_vec, colormap=["cyan", "gray"], visible=False, contrast_limits=[(0, 500), (0, 2500)])
+        viewer.add_image(mip_zarr, channel_axis=1, scale=scale_vec, colormap=["cyan", "gray"], visible=False, contrast_limits=[(50, 300), (0, 2500)])
 
     viewer.add_tracks(
         nls_tracks_df[["track_id", "t", z_var, "y", "x"]],

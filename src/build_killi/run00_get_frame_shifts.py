@@ -30,12 +30,12 @@ def align_frames(t, data_zyx, interval, nucleus_channel):
 
     return shift
 
-def get_timeseries_shifts(root, project_name, interval=25, nucleus_channel=1, par_flag=False, n_workers=None, last_i=None):
+def get_timeseries_shifts(root, project_name, interval=1, nucleus_channel=1, par_flag=False, n_workers=None, last_i=None):
 
     if n_workers is None:
         total_cpus = multiprocessing.cpu_count()
-        # Limit yourself to 33% of CPUs (rounded down, at least 1)
-        n_workers = max(1, total_cpus // 4)
+        # Limit yourself to 12% of CPUs (rounded down, at least 1)
+        n_workers = max(1, total_cpus // 8)
 
     # load zarr files
     zarr_path = os.path.join(root, "built_data", "zarr_image_files", project_name + ".zarr")
@@ -51,7 +51,7 @@ def get_timeseries_shifts(root, project_name, interval=25, nucleus_channel=1, pa
     frames_to_register = list(np.arange(0, last_i, interval))
     frames_to_register = np.asarray(frames_to_register + [last_i])
 
-    if interval > 25:
+    if interval > 5:
         raise Warning("Large frame interval specified. Registration may be suboptimal")
 
     # initialize function
