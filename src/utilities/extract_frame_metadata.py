@@ -1,146 +1,231 @@
-from tqdm import tqdm
 import glob2 as glob
 import os
-from typing import Any
-from typing import Dict
-from src.utilities.functions import path_leaf
+from typing import Any, Dict, Union
+
+# from utilities.functions import path_leaf
 import pandas as pd
-from aicsimageio import AICSImage
+import nd2
+# import openpyxl
 import numpy as np
+import dask.array as da
+from pathlib import Path
 
+def parse_plate_metadata(root, experiment_date, sheet_names=None):
 
-def parse_czi_metadata(czi_path, image_list, dT):
+    plate_directory = os.path.join(root, "metadata", "plate_maps", experiment_date + "_plate_map.xlsx")
 
-    imObject = AICSImage(czi_path)
-    im_raw_dask = imObject.data
+    if sheet_names is None:
+        sheet_names = ["series_number_map", "genotype", "start_age_hpf", "chem_perturbation"]
+
+    row_letters = ["A", "B", "C", "D", "E", "F", "G", "H"]
+    col_nums = [i for i in range(12)]
+
+    well_coord_list = []
+    for row in row_letters:
+        for col in col_nums:
+            well_coord_list.append(row + f"{col:02}")
+
+    well_coord_list = np.asarray(well_coord_list)
+
+    xl_temp = pd.ExcelFile(plate_directory)
+    # extract nd2 series info
+    series_vec_raw = xl_temp.parse(sheet_names[0]).iloc[0:8, 1:13].values.ravel()
+    nn_indices = np.where(~np.isnan(series_vec_raw))[0]
+    series_vec = series_vec_raw[nn_indices]
+    # extract staging info
+    start_age_hpf = xl_temp.parse(sheet_names[2]).iloc[0:8, 1:13].values.ravel()
+    start_age_hpf = start_age_hpf[nn_indices]
+    # extract genotype info
+    genotype_vec = xl_temp.parse(sheet_names[1]).iloc[0:8, 1:13].values.ravel()
+    genotype_vec = genotype_vec[nn_indices]
+
+    # extract chemical info
+    chem_vec = xl_temp.parse(sheet_names[3]).iloc[0:8, 1:13].values.ravel()
+    chem_vec = chem_vec[nn_indices]
+
+    # get list of well ID coordinates
+    well_coord_list = well_coord_list[nn_indices]
+
+    plate_df = pd.DataFrame(series_vec[:, np.newaxis], columns=["nd2_series"])
+    plate_df["well_id"] = well_coord_list
+    plate_df["genotype"] = genotype_vec
+    plate_df["chem_i"] = chem_vec
+    plate_df["start_age_hpf"] = start_age_hpf
+
+    return plate_df
+
+def permute_nd2_axes(nd2_object):
+
+    # imObject.sizes returns a dict: {axis_label: length}
+    axis_labels = list(nd2_object.sizes.keys())  # e.g., ['M', 'C', 'T', 'Z', 'Y', 'X']
+    # print("Axis labels:", axis_labels)
+    # Convert ND2 object to Dask array
+    im_raw_dask = nd2_object.to_dask()
+
+    # Map ND2 axis codes to human-readable names
+    AXIS_MAP = {
+        'P': 'well',  # Multipoint
+        'C': 'channel',
+        'T': 'time',
+        'Z': 'z',
+        'Y': 'y',
+        'X': 'x',
+    }
+
+    # Get mapping from axis label to its position
+    axis_pos = {AXIS_MAP[k]: i for i, k in enumerate(axis_labels) if k in AXIS_MAP}
+
+    # Now, access dimension sizes by name, safely!
+    n_wells = im_raw_dask.shape[axis_pos.get('well', 0)]  # default 0 if missing
+    n_channels = im_raw_dask.shape[axis_pos.get('channel', 0)]
+    n_time_points = im_raw_dask.shape[axis_pos.get('time', 0)]
+    n_z_slices = im_raw_dask.shape[axis_pos.get('z', 0)]
+    n_y = im_raw_dask.shape[axis_pos.get('y', 0)]
+    n_x = im_raw_dask.shape[axis_pos.get('x', 0)]
+
+    # print(f"wells={n_wells}, channels={n_channels}, time={n_time_points}, z={n_z_slices}, y={n_y}, x={n_x}")
+
+    # Optional: Reorder to standard [well, channel, time, z, y, x]
+    # Build permutation order
+    std_order = ['well', 'channel', 'time', 'z', 'y', 'x']
+    permute = [axis_pos[a] for a in std_order if a in axis_pos]
+
+    # Pad for missing axes (e.g., if not multipoint)
+    while len(permute) < 6:
+        permute.append(None)
+
+    # Only transpose if axes are not already in standard order
+    # if [axis_labels[i] if i is not None else None for i in permute] != ['P', 'C', 'T', 'Z', 'Y', 'X']:
+    im_raw_dask = da.moveaxis(im_raw_dask, permute, range(len(permute)))
+
+    return im_raw_dask
+def parse_nd2_metadata(nd2_path):
+
+    imObject = nd2.ND2File(nd2_path)
+    im_raw_dask = permute_nd2_axes(imObject)
+
     im_shape = im_raw_dask.shape
-    n_z_slices = im_shape[2]
-    n_time_points = im_shape[0]
-    # n_wells = 1
+    n_z_slices = im_shape[3]
+    n_time_points = im_shape[2]
+    n_wells = im_shape[0]
 
-    scale_vec = np.asarray(imObject.physical_pixel_sizes)
+    scale_vec = imObject.voxel_size()
 
     # extract frame times
-    n_frames_total = len(image_list)
-    frame_time_vec = np.arange(n_frames_total)*dT
+    n_frames_total = imObject.frame_metadata(0).contents.frameCount
+    frame_time_vec = [imObject.frame_metadata(i).channels[0].time.relativeTimeMs / 1000 for i in
+                      range(0, n_frames_total, n_z_slices)]
 
-    # # check for common nd2 artifact where time stamps jump midway through
-    # dt_frame_approx = (imObject.frame_metadata(n_z_slices).channels[0].time.relativeTimeMs -
-    #                    imObject.frame_metadata(0).channels[0].time.relativeTimeMs) / 1000
-    # jump_ind = np.where(np.diff(frame_time_vec) > 2 * dt_frame_approx)[0]  # typically it is multiple orders of magnitude to large
-    # if len(jump_ind) > 0:
-    #     jump_ind = jump_ind[0]
-    #     # prior to this point we will just use the time stamps. We will extrapolate to get subsequent time points
-    #     nf = jump_ind - 1 - int(jump_ind / 2)
-    #     dt_frame_est = (frame_time_vec[jump_ind - 1] - frame_time_vec[int(jump_ind / 2)]) / nf
-    #     base_time = frame_time_vec[jump_ind - 1]
-    #     for f in range(jump_ind, len(frame_time_vec)):
-    #         frame_time_vec[f] = base_time + dt_frame_est * (f - jump_ind)
-    # frame_time_vec = np.asarray(frame_time_vec)
+    # check for common nd2 artifact where time stamps jump midway through
+    dt_frame_approx = (imObject.frame_metadata(n_z_slices).channels[0].time.relativeTimeMs -
+                       imObject.frame_metadata(0).channels[0].time.relativeTimeMs) / 1000
+
+    jump_ind = np.where(np.diff(frame_time_vec) > 2 * dt_frame_approx)[0]  # typically it is multiple orders of magnitude to large
+    if len(jump_ind) > 0:
+        jump_ind = jump_ind[0]
+        # prior to this point we will just use the time stamps. We will extrapolate to get subsequent time points
+        nf = jump_ind - 1 - int(jump_ind / 2)
+        dt_frame_est = (frame_time_vec[jump_ind - 1] - frame_time_vec[int(jump_ind / 2)]) / nf
+        base_time = frame_time_vec[jump_ind - 1]
+        for f in range(jump_ind, len(frame_time_vec)):
+            frame_time_vec[f] = base_time + dt_frame_est * (f - jump_ind)
+    frame_time_vec = np.asarray(frame_time_vec)
 
     # get well positions
-    # stage_zyx_array = np.empty((n_wells * n_time_points, 3))
-    # for t in range(n_time_points):
-    #     for w in range(n_wells):
-    #         base_ind = t * n_wells + w
-    #         slice_ind = base_ind * n_z_slices
-    #
-    #         stage_zyx_array[base_ind, :] = np.asarray(
-    #             imObject.frame_metadata(slice_ind).channels[0].position.stagePositionUm)[::-1]
+    stage_zyx_array = np.empty((n_wells * n_time_points, 3))
+    for t in range(n_time_points):
+        for w in range(n_wells):
+            base_ind = t * n_wells + w
+            slice_ind = base_ind * n_z_slices
+
+            stage_zyx_array[base_ind, :] = np.asarray(
+                imObject.frame_metadata(slice_ind).channels[0].position.stagePositionUm)[::-1]
 
     ###################
     # Pull it together into dataframe
     ###################
-    well_df = pd.DataFrame(np.arange(n_time_points)[:, np.newaxis], columns=["time_index"])
-    # well_df["time_index"] = np.repeat(range(n_time_points), n_wells)
-    # well_df["well_index"] = np.tile(range(n_wells), n_time_points)
+    well_df = pd.DataFrame(np.tile(range(1, n_wells + 1), n_time_points)[:, np.newaxis], columns=["nd2_series"])
+    well_df["time_index"] = np.repeat(range(n_time_points), n_wells)
+    well_df["well_index"] = np.tile(range(n_wells), n_time_points)
 
     # add additional info
     well_df["time"] = frame_time_vec
-    # well_df["stage_z_um"] = stage_zyx_array[:, 0]
-    # well_df["stage_y_um"] = stage_zyx_array[:, 1]
-    # well_df["stage_x_um"] = stage_zyx_array[:, 2]
+    well_df["stage_z_um"] = stage_zyx_array[:, 0]
+    well_df["stage_y_um"] = stage_zyx_array[:, 1]
+    well_df["stage_x_um"] = stage_zyx_array[:, 2]
 
-    well_df["x_res_um_raw"] = scale_vec[0]
-    well_df["y_res_um_raw"] = scale_vec[1]
-    well_df["z_res_um_raw"] = scale_vec[2]
+    well_df["x_res_um"] = scale_vec[0]
+    well_df["y_res_um"] = scale_vec[1]
+    well_df["z_res_um"] = scale_vec[2]
 
-    # imObject.close()
+    imObject.close()
 
     return well_df
-# def parse_curation_metadata(root, experiment_date):
-#     curation_path = os.path.join(root, "metadata", "curation", experiment_date + "_curation_info.xlsx")
-#     if os.path.isfile(curation_path):
-#         curation_xl = pd.ExcelFile(curation_path)
-#         curation_df = curation_xl.parse(curation_xl.sheet_names[0])
-#         curation_df_long = pd.melt(curation_df,
-#                                    id_vars=["series_number", "notes", "example_flag", "follow_up_flag"],
-#                                    var_name="time_string", value_name="qc_flag")
-#         time_ind_vec = [int(t[1:]) for t in curation_df_long["time_string"].values]
-#         curation_df_long["time_index"] = time_ind_vec
-#         curation_df_long = curation_df_long.rename(columns={"series_number": "nd2_series"})
-#
-#     else:
-#         curation_df_long = None
-#         curation_df = None
-#
-#     return curation_df_long, curation_df
+def parse_curation_metadata(root, experiment_date):
+    curation_path = os.path.join(root, "metadata", "curation", experiment_date + "_curation_info.xlsx")
+    if os.path.isfile(curation_path):
+        curation_xl = pd.ExcelFile(curation_path)
+        curation_df = curation_xl.parse(curation_xl.sheet_names[0])
+        curation_df_long = pd.melt(curation_df,
+                                   id_vars=["series_number", "notes", "tbx5a_flag", "follow_up_flag"],
+                                   var_name="time_index", value_name="qc_flag")
+        # time_ind_vec = [int(t[1:]) for t in curation_df_long["time_string"].values]
+        # curation_df_long["time_index"] = time_ind_vec
+        curation_df_long = curation_df_long.rename(columns={"series_number": "nd2_series"})
+
+    else:
+        curation_df_long = None
+        curation_df = None
+
+    return curation_df_long, curation_df
 
 def extract_frame_metadata(
-    root: str,
+    root: Union[Path, str],
     experiment_date: str
 ) -> Dict[str, Any]:
 
+    root = Path(root)
+    raw_directory = root / "raw_data" / experiment_date
 
-    raw_directory = os.path.join(root, "raw_data", experiment_date, '')
-
-    save_directory = os.path.join(root, "metadata", "frame_metadata", '')
-    if not os.path.isdir(save_directory):
-        os.makedirs(save_directory)
+    save_directory = root / "metadata" / "frame_metadata"
+    os.makedirs(save_directory, exist_ok=True)
 
     # get list of images
-    image_list = sorted(glob.glob(raw_directory + "*.nd2"))
-
-    if not os.path.isdir(save_directory):
-        os.makedirs(save_directory)
+    image_list = list(raw_directory.glob("*.nd2"))
 
     if len(image_list) > 1:
         raise Exception("Multiple .nd2 files were found in target directory. Make sure to put fullembryo images into a subdirectory")
 
-    czi_path = image_list[0]
-    imObject = nd2.ND2File(czi_path)
-    im_array_dask = imObject.to_dask()
-    nd2_shape = im_array_dask.shape
+    nd2_path = image_list[0]
+    imObject = nd2.ND2File(nd2_path)
+    im_raw_dask =permute_nd2_axes(imObject)
+
+
+    nd2_shape = im_raw_dask.shape
 
     metadata = dict({})
-    metadata["n_time_points"] = nd2_shape[0]
-    metadata["n_wells"] = nd2_shape[1]
-    n_z = nd2_shape[2]
-    if len(nd2_shape) == 6:
-        n_channels = nd2_shape[3]
-        n_x = nd2_shape[5]
-        n_y = nd2_shape[4]
-    else:
-        n_channels = 1
-        n_x = nd2_shape[4]
-        n_y = nd2_shape[3]
+    metadata["n_time_points"] = nd2_shape[2]
+    metadata["n_wells"] = nd2_shape[0]
+    n_z = nd2_shape[-3]
+    n_x = nd2_shape[-1]
+    n_y = nd2_shape[-2]
 
-    metadata["n_channels"] = n_channels
+    metadata["n_channels"] = nd2_shape[1] if len(nd2_shape) > 5 else 1
     metadata["zyx_shape"] = tuple([n_z, n_y, n_x])
     metadata["voxel_size_um"] = tuple(np.asarray(imObject.voxel_size())[::-1])
 
-    im_name = path_leaf(czi_path)
-    print("processing " + im_name)
+    im_name = os.path.basename(nd2_path)
+    # print("processing " + im_name)
 
     ####################
     # Process information from plate map
-    # plate_df = parse_plate_metadata(root, experiment_date)
+    plate_df = parse_plate_metadata(root, experiment_date)
 
     ####################
     # Process extract information from nd2 metadata
     ####################
     # join on plate info using series id
-    well_df = parse_czi_metadata(czi_path, image_list, dT)
+    well_df = parse_nd2_metadata(nd2_path)
     plate_cols = plate_df.columns
     well_cols = well_df.columns
     well_df = well_df.merge(plate_df, on="nd2_series", how="left")
@@ -159,14 +244,14 @@ def extract_frame_metadata(
     well_df["estimated_stage_hpf"] = well_df["start_age_hpf"] + well_df["time"]/3600
 
     # save
-    well_df.to_csv(os.path.join(root, "metadata", experiment_date + "_master_metadata_df.csv"), index=False)
+    well_df.to_csv(os.path.join(root, "metadata", "frame_metadata", experiment_date + "_master_metadata_df.csv"), index=False)
 
     return metadata
 
 if __name__ == "__main__":
 
     # set path to CellPose model to use
-    root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\pecfin_dynamics\\fin_morphodynamics\\"
+    root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\pecfin_dynamics\\"
     experiment_date = "20240223"
 
 

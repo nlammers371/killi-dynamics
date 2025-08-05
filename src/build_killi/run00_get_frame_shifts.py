@@ -43,7 +43,6 @@ def get_timeseries_shifts(root, project_name, interval=1, nucleus_channel=1, par
     image_data = zarr.open(zarr_path, mode="r")
 
     if last_i is None:
-
         last_i = image_data.shape[0] - interval - 1
 
     frame_vec = np.arange(0, last_i + interval + 1)
