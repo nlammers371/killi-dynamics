@@ -13,7 +13,7 @@ def run_simulation_1D(param_dict, grid, model_class, tracker_class, dt=10, T=360
     state = model.get_state(grid)
 
     tracker = tracker_class(grid, interval=interval)
-    model.solve(state, t_range=T, dt=dt, tracker=["progress", tracker])
+    result = model.solve(state, t_range=T, dt=dt, tracker=["progress", tracker])
 
     # Merge input parameters and tracked metrics
     result = {
@@ -22,7 +22,7 @@ def run_simulation_1D(param_dict, grid, model_class, tracker_class, dt=10, T=360
     }
 
     return result
-
-results = Parallel(n_jobs=16)(
-    delayed(run_simulation)(param) for param in param_list
-)
+#
+# results = Parallel(n_jobs=16)(
+#     delayed(run_simulation)(param) for param in param_list
+# )
