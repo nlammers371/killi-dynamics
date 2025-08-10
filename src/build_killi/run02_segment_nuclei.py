@@ -376,12 +376,16 @@ def estimate_li_thresh(root, project_name, interval=125, nuclear_channel=None, s
             pass
 
 
-    frames_full = np.arange(0, last_i)
+    # frames_full = np.arange(0, last_i)
     # li_interp = np.interp(frames_full, thresh_frames[:7], li_vec)
     # li_interpolator = interp1d(thresh_frames[:7], li_vec, kind='linear', fill_value="extrapolate")
 
+    # DEBUGGING ATTEMPT
+    print("frame_vec:", frame_vec)
+    print("li_vec:", li_vec)
+
     # Fit a linear model (degree 1 polynomial)
-    coefficients = np.polyfit(frame_vec, li_vec, deg=1)
+    # coefficients = np.polyfit(frame_vec, li_vec, deg=1)
 
     # Predict y values
     # li_interp = np.polyval(coefficients, frames_full)
