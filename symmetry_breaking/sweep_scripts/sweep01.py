@@ -15,6 +15,7 @@ lock = Lock()
 output_file = "sweep_results.csv"
 
 def run_and_save_single_simulation(args):
+
     param_dict, sim_config, output_dir = args
 
     # Unpack sim config
@@ -50,7 +51,7 @@ def run_and_save_single_simulation(args):
 #     all_combos = list(itertools.product(*value_lists))
 #     return [dict(zip(keys, combo)) for combo in all_combos]
 
-def ensure_output_dir(path="results"):
+def ensure_output_dir(path: str | os.PathLike):
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -74,19 +75,19 @@ def make_param_dicts(param_grid, grid_type="grid", n_samples=1000, seed=42):
 if __name__ == "__main__":
     import multiprocessing as mp
     from pathlib import Path
-
-    root = Path("")
+    sweep_name = "sweep01"
+    root = Path("/media/nick/hdd021/Cole Trapnell's Lab Dropbox/Nick Lammers/Nick/symmetry_breaking/pde/sweeps/")
     # Settings
     use_random = True  # or False for full grid
-    n_workers = mp.cpu_count() - 1
+    n_workers = np.max([1, int(mp.cpu_count() /1.25)])
     grid_type = "random" if use_random else "grid"
-    n_samples = 1000
+    n_samples = 100000
 
     # hyperparams
     dx = 10
     L = 3500
     T = 10 * 60 * 60
-    dt = 0.5 * dx ** 2 / 15 / 2
+    dt = 0.5 * dx ** 2 / 15 / 1.25 # Stability condition for diffusion
 
     param_grid = {
         "V_R": np.logspace(-3, -1, 10),
@@ -122,13 +123,15 @@ if __name__ == "__main__":
                 }
 
     param_dicts = make_param_dicts(param_grid, grid_type=grid_type, n_samples=n_samples)
-    output_dir = ensure_output_dir(root / "symmetry_breaking" / "sweeps" / "sim_batch_01")
+    output_dir = ensure_output_dir(root /  sweep_name )
 
     print(f"Running {len(param_dicts)} simulations...")
 
     args = [(p | static_params, sim_config, output_dir) for p in param_dicts]
 
-    with Pool() as pool:
-        pool.map(run_and_save_single_simulation, args)
+    with mp.Pool(processes=n_workers) as pool:
+        # Use tqdm to wrap pool.map and show progress
+        for _ in tqdm(pool.imap(run_and_save_single_simulation, args), total=len(args), desc="Simulations"):
+            pass  # This keeps tqdm working, but you don't need to do anything here
 
     print("Sweep complete. Results saved to:", output_dir)

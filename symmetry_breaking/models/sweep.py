@@ -13,7 +13,7 @@ def run_simulation_1D(param_dict, grid, model_class, tracker_class, dt=10, T=360
     state = model.get_state(grid)
 
     tracker = tracker_class(grid, interval=interval)
-    result = model.solve(state, t_range=T, dt=dt, tracker=["progress", tracker])
+    _ = model.solve(state, t_range=T, dt=dt, tracker=tracker)
 
     # Merge input parameters and tracked metrics
     result = {
