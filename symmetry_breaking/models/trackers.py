@@ -3,7 +3,7 @@ from pde.trackers.base import TrackerBase
 
 class NodalROITracker(TrackerBase):
     def __init__(self, grid, roi_width=500, interval=10,
-                 save_profiles=True, downsample=None, dtype=np.float16,
+                 save_profiles=True, downsample=None, dtype=np.float32,
                  field_labels=("Activator", "Repressor", "rho")):
         """
         Tracks Nodal distribution metrics over time in a 1D simulation.
