@@ -17,6 +17,35 @@ from func_timeout import func_timeout, FunctionTimedOut
 import statsmodels.api as sm
 import multiprocessing
 
+
+def extract_random_quadrant(vol, seed=None):
+    """
+    Extract a random quadrant in the YX plane of a ZYX stack.
+
+    Quadrants:
+        0: top-left
+        1: top-right
+        2: bottom-left
+        3: bottom-right
+    """
+    if seed is not None:
+        np.random.seed(seed)
+
+    z, y, x = vol.shape
+    half_y, half_x = y // 2, x // 2
+
+    quadrant = np.random.choice(4)
+
+    if quadrant == 0:  # top-left
+        return vol[:, :half_y, :half_x]
+    elif quadrant == 1:  # top-right
+        return vol[:, :half_y, half_x:]
+    elif quadrant == 2:  # bottom-left
+        return vol[:, half_y:, :half_x]
+    elif quadrant == 3:  # bottom-right
+        return vol[:, half_y:, half_x:]
+
+
 def calculate_li_trend(root, project_prefix, first_i=0, last_i=None, multiside_experiment=True):
 
     if not multiside_experiment:
@@ -62,7 +91,7 @@ def calculate_li_trend(root, project_prefix, first_i=0, last_i=None, multiside_e
     x = x[outlier_filter]
     y = y[outlier_filter]
     si = np.argsort(x)
-    x = x[si]
+    x = x[si] + np.random.rand(len(x)) * 0.01  # add a small random jitter to avoid ties
     y = y[si]
 
     # perform smoothing
@@ -133,14 +162,16 @@ def calculate_li_thresh(image, LoG_sigma=1, gauss_sigma=None, thresh_li=None):
     
     if gauss_sigma is None:
         gauss_sigma = (1.33, 4, 4)
-    
+
     # denoised = ndi.median_filter(data_zyx, size=3)
     gaussian_background = ski.filters.gaussian(image, sigma=gauss_sigma, preserve_range=True)
     data_bkg = image - gaussian_background
 
     data_log = sitk.GetArrayFromImage(sitk.LaplacianRecursiveGaussian(sitk.GetImageFromArray(data_bkg), sigma=LoG_sigma))
     data_log_i = ski.util.invert(data_log)
+
     if thresh_li is None:
+        data_log_i = extract_random_quadrant(data_log_i) # downsample
         thresh_li = filters.threshold_li(data_log_i)
     
     return data_log_i, thresh_li
@@ -234,7 +265,7 @@ def segment_nuclei(root, project_name, nuclear_channel=None, n_workers=None, par
     if n_workers is None:
         total_cpus = multiprocessing.cpu_count()
         # Limit yourself to 33% of CPUs (rounded down, at least 1)
-        n_workers = max(1, total_cpus // 2)
+        n_workers = max(1, total_cpus // 3)
 
     # get raw data dir
     zarr_path = os.path.join(root, "built_data", "zarr_image_files", project_name + ".zarr")
@@ -329,6 +360,7 @@ def segment_nuclei(root, project_name, nuclear_channel=None, n_workers=None, par
 
 
 def estimate_li_thresh(root, project_name, interval=125, nuclear_channel=None, start_i=0, last_i=None, timeout=60*6):
+
     # get raw data dir
     zarr_path = os.path.join(root, "built_data", "zarr_image_files", project_name + ".zarr")
 
@@ -376,12 +408,12 @@ def estimate_li_thresh(root, project_name, interval=125, nuclear_channel=None, s
             pass
 
 
-    frames_full = np.arange(0, last_i)
+    # frames_full = np.arange(0, last_i)
     # li_interp = np.interp(frames_full, thresh_frames[:7], li_vec)
     # li_interpolator = interp1d(thresh_frames[:7], li_vec, kind='linear', fill_value="extrapolate")
 
     # Fit a linear model (degree 1 polynomial)
-    coefficients = np.polyfit(frame_vec, li_vec, deg=1)
+    # coefficients = np.polyfit(frame_vec, li_vec, deg=1)
 
     # Predict y values
     # li_interp = np.polyval(coefficients, frames_full)
@@ -400,7 +432,7 @@ def estimate_li_thresh(root, project_name, interval=125, nuclear_channel=None, s
     # li_df.to_csv(out_directory + project_name + "_li_df.csv", index=False)
     li_df_raw.to_csv(out_directory + project_name + "_li_df.csv", index=False)
 
-    return li_df
+    return li_df_raw
 
 if __name__ == '__main__':
     
