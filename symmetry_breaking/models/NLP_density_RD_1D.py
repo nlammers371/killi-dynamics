@@ -29,7 +29,7 @@ class NodalLeftyDensity1D(PDEBase):
 
     def __init__(self,
                  # Diffusion baselines (free diffusion) and density sensitivity
-                 D0_N=1.85, D0_L=15.0,
+                 D0_N=60, D0_L=60,
                  alpha_N=1.14, alpha_L=0.46, # defaults derived from empirical measurements
                  # Production (σ) and decay (μ)
                  sigma_N=1.0, sigma_L=1e-2,
@@ -51,7 +51,7 @@ class NodalLeftyDensity1D(PDEBase):
                  # Initial conditions
                  N_init="gaussian", N_amp=10.0, N_sigma=10.0,
                  L_init="constant", L_value=0.0, L_noise_range=(0.2, 0.6),
-                 rho_init="constant", rho_value=0.1, rho_noise_amp=0.0):
+                 rho_init="constant", rho_value=0.01, rho_noise_amp=0.0):
         super().__init__()
 
         # Transport
@@ -124,10 +124,10 @@ class NodalLeftyDensity1D(PDEBase):
 
         # Production terms (density-scaled)
         N_prod = (rho / self.rho_max) * self.sigma_N * (N**self.n) / (self.K_A**self.n + N**self.n)
-        L_prod = (rho / self.rho_max) * self.sigma_L * (N**self.p) / (self.K_NL**self.p + N**self.p)
+        L_prod = (rho / self.rho_max) * self.sigma_L * (N**self.m) / (self.K_R**self.m + N**self.m)
 
         # Inhibition + decay
-        N_inhib = self.lambda_ * N * (L**self.m) / (self.K_R**self.m + L**self.m)
+        N_inhib = self.lambda_ * N * (L**self.p) / (self.K_NL**self.p + L**self.p)
         N_loss = self.mu_N * N
         L_loss = self.mu_L * L
 
