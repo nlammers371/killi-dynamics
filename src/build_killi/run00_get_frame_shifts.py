@@ -15,10 +15,19 @@ import multiprocessing
 # Syd had to reposition the FOV early on in the imaging process. As a result the early and late timelapse frames were
 # exported separately. This script registers early with late, and generates a combine zarr file
 
+def extract_bottom_right_quadrant(vol):
+    """Extract bottom-right quadrant in the YX plane of a ZYX stack."""
+    z, y, x = vol.shape
+    return vol[:, y//2:, x//2:]
+
 def align_frames(t, data_zyx, interval, nucleus_channel):
 
     data_zyx0 = np.squeeze(data_zyx[t, nucleus_channel])
     data_zyx1 = np.squeeze(data_zyx[t + interval, nucleus_channel])
+
+    # Extract bottom-right quadrant
+    data_zyx0 = extract_bottom_right_quadrant(data_zyx0)
+    data_zyx1 = extract_bottom_right_quadrant(data_zyx1)
 
     shift, error, _ = phase_cross_correlation(
         data_zyx0,
@@ -30,12 +39,12 @@ def align_frames(t, data_zyx, interval, nucleus_channel):
 
     return shift
 
-def get_timeseries_shifts(root, project_name, interval=1, nucleus_channel=1, par_flag=False, n_workers=None, last_i=None):
+def get_timeseries_shifts(root, project_name, interval=1, nucleus_channel=1, calc_chunk=None, n_workers=None, last_i=None):
 
     if n_workers is None:
         total_cpus = multiprocessing.cpu_count()
-        # Limit yourself to 12% of CPUs (rounded down, at least 1)
-        n_workers = max(1, total_cpus // 8)
+        # Limit to 25% of CPUs (rounded down, at least 1)
+        n_workers = max(1, total_cpus // 4)
 
     # load zarr files
     zarr_path = os.path.join(root, "built_data", "zarr_image_files", project_name + ".zarr")

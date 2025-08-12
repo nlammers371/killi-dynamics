@@ -9,6 +9,7 @@ from tqdm import tqdm
 import pandas as pd
 from tqdm.contrib.concurrent import process_map
 from functools import partial
+import multiprocessing
 
 def align_halves(t, image_data1, image_data2, z_align_size=50, nucleus_channel=1):
 
@@ -37,7 +38,12 @@ def align_halves(t, image_data1, image_data2, z_align_size=50, nucleus_channel=1
     return shift_corrected
 
 def get_hemisphere_shifts(root, side1_name, side2_name, interval=25, nucleus_channel=1, z_align_size=50,
-                          last_i=None, start_i=0):
+                          last_i=None, start_i=0, n_workers=None):
+
+    if n_workers is None:
+        total_cpus = multiprocessing.cpu_count()
+        # Limit to 25% of CPUs (rounded down, at least 1)
+        n_workers = max(1, total_cpus // 4)
 
     # load zarr files
     side1_path = os.path.join(root, "built_data", "zarr_image_files", side1_name + ".zarr")
@@ -58,7 +64,7 @@ def get_hemisphere_shifts(root, side1_name, side2_name, interval=25, nucleus_cha
     align_fun = partial(align_halves, image_data1=image_data1, image_data2=image_data2,
                         z_align_size=z_align_size, nucleus_channel=nucleus_channel)
     # apply
-    shift_vec = process_map(align_fun, frames_to_register, max_workers=8, chunksize=1)
+    shift_vec = process_map(align_fun, frames_to_register, max_workers=n_workers, chunksize=1)
 
     # interpolate
     shift_array = np.asarray(shift_vec)
