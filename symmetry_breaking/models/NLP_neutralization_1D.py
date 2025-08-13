@@ -80,7 +80,7 @@ class NodalLeftyNeutralization1D(PDEBase):
         self.p = p
         self.q = q
         self.K_A = K_A
-        self.K_R = K_R
+        # self.K_R = K_R
         self.K_NL = K_P if K_P is not None else K_NL
         self.K_rho = K_A if lock_rho_K else K_rho
 

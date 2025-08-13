@@ -113,16 +113,18 @@ def make_1d_grid(length=3000, dx=10, periodic=True):
 
 def run_simulation_1D(param_dict, grid, model_class, tracker_class, dt=10, T=36000, interval=100):
 
+    adjusted_interval = int(interval / dt )
     model = model_class(**param_dict)
     state = model.get_state(grid)
 
-    tracker = tracker_class(grid, interval=interval)
+    tracker = tracker_class(grid, interval=adjusted_interval)
     _ = model.solve(state, t_range=T, dt=dt, tracker=tracker)
 
     # Merge input parameters and tracked metrics
     result = {
         **param_dict,
-        **tracker.get_metrics(),  # You’ll define this method
+        **tracker.get_metrics(),
+        **tracker.get_profiles(),
     }
 
     return result

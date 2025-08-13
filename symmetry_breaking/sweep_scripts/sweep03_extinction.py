@@ -34,7 +34,7 @@ if __name__ == "__main__":
 
     param_grid = {
         "N_amp": np.logspace(1, 4, 25),
-        "R_amp": np.logspace(1, 4, 25),
+        "L_value": np.logspace(1, 4, 25),
     }
 
     static_params = {
@@ -56,6 +56,7 @@ if __name__ == "__main__":
         'p': 2,
         'q': 2,
         "no_density_dependence": True,
+        "L_init": "constant"
     }
 
     sim_config = {
