@@ -39,7 +39,7 @@ class NodalLeftyNeutralization1D(PDEBase):
                  mu_L=0.61e-4,
                  no_density_dependence=False,  # if True, set alpha_N=alpha_L=0
                  # Hill parameters and thresholds
-                 n=2, m=2, p=2, q=2,
+                 n=2, m=1, p=2, q=2,
                  K_A=100.0,      # N auto-activation threshold
                  K_R=100.0,      # kept for API parity; unused in neutralization
                  K_NL=100.0,     # N -> L activation threshold
@@ -120,10 +120,14 @@ class NodalLeftyNeutralization1D(PDEBase):
         phi.data = np.clip(phi.data, phi_min, 1.0)
         return phi
 
-    def D_N(self, rho: ScalarField) -> ScalarField:
+    def D_N(self, rho):
+        if self.no_density_dependence:
+            return ScalarField(rho.grid, data=self.D0_N)
         return self.D0_N * (self.porosity(rho) ** self.alpha_N)
 
-    def D_L(self, rho: ScalarField) -> ScalarField:
+    def D_L(self, rho):
+        if self.no_density_dependence:
+            return ScalarField(rho.grid, data=self.D0_L)
         return self.D0_L * (self.porosity(rho) ** self.alpha_L)
 
     # ---------- PDE core ----------
@@ -161,7 +165,7 @@ class NodalLeftyNeutralization1D(PDEBase):
         P_N = self.rho_max * (N ** self.q) / (self.K_rho ** self.q + N ** self.q)
         rho_relax = (P_N - rho) / self.tau_rho
         rho_diff = self.D_rho * rho.laplace(self.bc)  # note: ∂ρ/∂t = ... - D_ρ ∇²ρ per LaTeX
-        drho_dt = rho_relax - rho_diff
+        drho_dt = rho_relax + rho_diff
 
         # Assemble RHS
         dN_dt = N_act - N_loss + diff_N
