@@ -41,7 +41,7 @@ class NodalLeftyNeutralization1D(PDEBase):
                  # Hill parameters and thresholds
                  n=2, m=1, p=2, q=2,
                  K_A=100.0,      # N auto-activation threshold
-                 K_R=100.0,      # kept for API parity; unused in neutralization
+                 # K_R=100.0,      # kept for API parity; unused in neutralization
                  K_NL=100.0,     # N -> L activation threshold
                  K_rho=100.0,    # P(N) threshold
                  K_P=None,       # optional alias: if provided, overrides K_NL
