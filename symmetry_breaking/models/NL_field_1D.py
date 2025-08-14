@@ -9,6 +9,10 @@ class NodalLeftyField1D(PDEBase):
     rho evolves but has no causal effect on N or L.
     Deterministic and stochastic triggers can be applied to N and/or L channels.
     Each trigger type (deterministic, stochastic) can use "direct" or "impulse" mode.
+
+    IMPORTANT: In this revision, "direct" triggers no longer modify the state inside
+    evolution_rate(). They are deposited into a per-step accumulator (_J_N/_J_L) and
+    converted to a source S_dir = J / dt once per step for numerical consistency.
     """
 
     def __init__(self,
@@ -37,7 +41,7 @@ class NodalLeftyField1D(PDEBase):
                  stoch_N_mode="direct",
                  stoch_to_L=False, rate_L=0.0, amp_median_L=1.0, amp_sigma_L=0.5,
                  stoch_L_mode="direct",
-                 sigma_x=10.0, tau_impulse=1.0):
+                 sigma_x=30, tau_impulse=1.0):
         super().__init__()
 
         # Diffusion
@@ -99,59 +103,62 @@ class NodalLeftyField1D(PDEBase):
         self._t_prev = None
         self._det_N_fired = False
         self._det_L_fired = False
-        self._F_N = None
-        self._F_L = None
+        self._F_N = None     # accumulator for impulse-mode N
+        self._F_L = None     # accumulator for impulse-mode L
+        self._J_N = None     # per-step pending direct jump for N
+        self._J_L = None     # per-step pending direct jump for L
 
+    # ---------------- Core PDE ----------------
     def evolution_rate(self, state: FieldCollection, t: float = 0.0) -> FieldCollection:
-        N, L, rho = state
+        N, L, rho = state  # ScalarFields
 
-        # Init accumulators for impulse mode
+        # Init accumulators for impulse & per-step direct jumps
         if self._F_N is None:
             self._F_N = ScalarField(N.grid, 0.0)
         if self._F_L is None:
             self._F_L = ScalarField(L.grid, 0.0)
+        if self._J_N is None:
+            self._J_N = ScalarField(N.grid, 0.0)
+        if self._J_L is None:
+            self._J_L = ScalarField(L.grid, 0.0)
 
-        # Time step length
+        # Time step length (solver's effective step)
         dt = 0.0 if self._t_prev is None or t <= self._t_prev else t - self._t_prev
 
-        # Decay accumulators
+        # Decay impulse accumulators (for impulse mode)
         if dt > 0.0 and self.tau_impulse > 0.0:
             decay = np.exp(-dt / self.tau_impulse)
             self._F_N.data *= decay
             self._F_L.data *= decay
 
-        # ---- Deterministic triggers ----
+        # ---------------- Deterministic triggers ----------------
         if self.N_t_init is not None and not self._det_N_fired and self._t_prev is not None and self._t_prev < self.N_t_init <= t:
-            self._apply_trigger(N, self._F_N, mode=self.det_N_mode,
-                                amp=self.N_t_amp or self.N_amp,
-                                sigma=self.N_t_sigma or self.N_sigma)
+            self._apply_trigger(field=N, F_accum=self._F_N, mode=self.det_N_mode,
+                                amp=self.N_t_amp if self.N_t_amp is not None else self.N_amp,
+                                sigma=self.N_t_sigma if self.N_t_sigma is not None else self.N_sigma)
             self._det_N_fired = True
 
         if self.L_t_init is not None and not self._det_L_fired and self._t_prev is not None and self._t_prev < self.L_t_init <= t:
-            self._apply_trigger(L, self._F_L, mode=self.det_L_mode,
-                                amp=self.L_t_amp or self.L_value,
-                                sigma=self.L_t_sigma or self.N_sigma)
+            self._apply_trigger(field=L, F_accum=self._F_L, mode=self.det_L_mode,
+                                amp=self.L_t_amp if self.L_t_amp is not None else self.L_value,
+                                sigma=self.L_t_sigma if self.L_t_sigma is not None else self.N_sigma)
             self._det_L_fired = True
 
-        # ---- Stochastic triggers ----
+        # ---------------- Stochastic triggers ----------------
         if dt > 0.0:
             length = float(N.grid.axes_bounds[0][1] - N.grid.axes_bounds[0][0])
-            if self.stoch_to_N and self.rate_N > 0.0:
-                self._sample_spikes(N, self._F_N, dt, length,
-                                    rate=self.rate_N,
-                                    amp_median=self.amp_median_N,
-                                    amp_sigma=self.amp_sigma_N,
-                                    sigma_x=self.sigma_x,
-                                    mode=self.stoch_N_mode)
-            if self.stoch_to_L and self.rate_L > 0.0:
-                self._sample_spikes(L, self._F_L, dt, length,
-                                    rate=self.rate_L,
-                                    amp_median=self.amp_median_L,
-                                    amp_sigma=self.amp_sigma_L,
-                                    sigma_x=self.sigma_x,
-                                    mode=self.stoch_L_mode)
 
-        # ---- Core PDE dynamics ----
+            if self.stoch_to_N and self.rate_N > 0.0:
+                self._sample_spikes(field=N, F_accum=self._F_N, dt=dt, length=length,
+                                    rate=self.rate_N, amp_median=self.amp_median_N, amp_sigma=self.amp_sigma_N,
+                                    sigma_x=self.sigma_x, mode=self.stoch_N_mode)
+
+            if self.stoch_to_L and self.rate_L > 0.0:
+                self._sample_spikes(field=L, F_accum=self._F_L, dt=dt, length=length,
+                                    rate=self.rate_L, amp_median=self.amp_median_L, amp_sigma=self.amp_sigma_L,
+                                    sigma_x=self.sigma_x, mode=self.stoch_L_mode)
+
+        # ---------------- Reaction terms ----------------
         N_free = self._free_nodal_from_binding(N, L)
 
         N_act = self.sigma_N * (N_free ** self.n) / (self.K_A ** self.n + N_free ** self.n)
@@ -161,34 +168,59 @@ class NodalLeftyField1D(PDEBase):
         N_loss = self.mu_N * N
         L_loss = self.mu_L * L
 
+        # ---------------- Diffusion ----------------
         diff_N = self.D_N * N.laplace(self.bc)
         diff_L = self.D_L * L.laplace(self.bc)
 
-        S_N = (self._F_N / self.tau_impulse) if self.stoch_N_mode == "impulse" or self.det_N_mode == "impulse" else 0.0
-        S_L = (self._F_L / self.tau_impulse) if self.stoch_L_mode == "impulse" or self.det_L_mode == "impulse" else 0.0
+        # ---------------- Source assembly ----------------
+        # Impulse-mode source (continuous)
+        S_imp_N = (self._F_N / self.tau_impulse) if (self.stoch_N_mode == "impulse" or self.det_N_mode == "impulse") else 0.0
+        S_imp_L = (self._F_L / self.tau_impulse) if (self.stoch_L_mode == "impulse" or self.det_L_mode == "impulse") else 0.0
 
+        # Direct-mode source (apply pending jump once per step)
+        if dt > 0.0:
+            S_dir_N = ScalarField(N.grid, self._J_N.data / dt)
+            S_dir_L = ScalarField(L.grid, self._J_L.data / dt)
+            # clear after use
+            self._J_N.data.fill(0.0)
+            self._J_L.data.fill(0.0)
+        else:
+            S_dir_N = ScalarField(N.grid, 0.0)
+            S_dir_L = ScalarField(L.grid, 0.0)
+
+        S_N = S_imp_N + S_dir_N
+        S_L = S_imp_L + S_dir_L
+
+        # ---------------- Final RHS ----------------
         dN_dt = N_act - N_loss + diff_N + S_N
         dL_dt = L_prod - L_loss + diff_L + S_L
 
-        # Passive rho evolution
-        rho_relax = (rho - rho) / self.tau_rho  # zero; placeholder
+        # Passive rho evolution (placeholder)
+        rho_relax = (rho - rho) / self.tau_rho  # zero
         rho_diff = self.D_rho * rho.laplace(self.bc)
         drho_dt = rho_relax + rho_diff
 
         self._t_prev = t
         return FieldCollection([dN_dt, dL_dt, drho_dt])
 
+    # ---------------- State init ----------------
     def get_state(self, grid: CartesianGrid) -> FieldCollection:
         N = self._init_N(grid).copy(label="Nodal_total")
         L = self._init_L(grid).copy(label="Lefty")
         rho = self._init_rho(grid).copy(label="Density")
+
+        # reset internal state
         self._t_prev = None
         self._det_N_fired = False
         self._det_L_fired = False
         self._F_N = ScalarField(grid, 0.0)
         self._F_L = ScalarField(grid, 0.0)
+        self._J_N = ScalarField(grid, 0.0)
+        self._J_L = ScalarField(grid, 0.0)
+
         return FieldCollection([N, L, rho])
 
+    # ---------------- Helpers ----------------
     def _init_N(self, grid):
         if self.N_init == "gaussian":
             x = grid.axes_coords[0]
@@ -222,6 +254,7 @@ class NodalLeftyField1D(PDEBase):
         return ScalarField(grid, self.rho_value)
 
     def _free_nodal_from_binding(self, N, L):
+        # Fast 1:1 binding: (N-C)(L-C) = Kd * C  with Kd = K_I
         Kd = self.K_I
         Nt = N.data
         Lt = L.data
@@ -234,12 +267,25 @@ class NodalLeftyField1D(PDEBase):
         return ScalarField(N.grid, N_free)
 
     def _apply_trigger(self, field, F_accum, mode, amp, sigma):
+        """Route triggers to either impulse accumulator or per-step direct jump."""
         if mode == "direct":
-            self._add_gaussian_bump(field, amp, sigma)
+            # deposit into the correct per-step jump buffer
+            label = getattr(field, "label", "")
+            if "Nodal" in label:
+                target = self._J_N
+            elif "Lefty" in label:
+                target = self._J_L
+            else:
+                raise ValueError(f"Unknown field label for direct trigger: {label!r}")
+            self._add_gaussian_bump(target, amp, sigma)
         elif mode == "impulse":
+            # deposit into exponential-decay accumulator
             self._add_gaussian_bump(F_accum, amp, sigma)
+        else:
+            raise ValueError(f"Unrecognized trigger mode: {mode}")
 
     def _sample_spikes(self, field, F_accum, dt, length, rate, amp_median, amp_sigma, sigma_x, mode):
+        """Draw Poisson number of spikes and deposit them either as direct jumps (J) or impulse (F)."""
         N_events = self.rng.poisson(rate * length * dt)
         if N_events == 0:
             return
@@ -248,17 +294,17 @@ class NodalLeftyField1D(PDEBase):
         amps = self.rng.lognormal(mean=np.log(amp_median), sigma=amp_sigma, size=N_events)
         for xi, Ai in zip(xs, amps):
             if mode == "direct":
-                self._add_gaussian_bump(field, Ai, sigma_x, center=xi)
+                label = getattr(field, "label", "")
+                target = self._J_N if "Nodal" in label else self._J_L
+                self._add_gaussian_bump(target, Ai, sigma_x, center=xi)
             elif mode == "impulse":
                 self._add_gaussian_bump(F_accum, Ai, sigma_x, center=xi)
+            else:
+                raise ValueError(f"Unrecognized stochastic mode: {mode}")
 
     def _add_gaussian_bump(self, target_field, amp, sigma, center="center"):
+        """Add a Gaussian bump with PEAK = amp (no area normalization)."""
         x = target_field.grid.axes_coords[0]
-        if center == "center":
-            x0 = 0.5 * (x[0] + x[-1])
-        else:
-            x0 = float(center)
+        x0 = 0.5 * (x[0] + x[-1]) if center == "center" else float(center)
         kernel = np.exp(-((x - x0) ** 2) / (2 * sigma ** 2))
-        norm = np.trapz(kernel, x=x)
-        if norm > 0:
-            target_field.data += (amp / norm) * kernel
+        target_field.data += amp * kernel
