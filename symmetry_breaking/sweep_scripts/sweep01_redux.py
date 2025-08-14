@@ -18,11 +18,11 @@ output_file = "sweep_results.csv"
 if __name__ == "__main__":
     import multiprocessing as mp
     from pathlib import Path
-    sweep_name = "sweep02_neutralization_v2"
+    sweep_name = "sweep01_neutralization_v2"
     root = Path("/media/nick/hdd021/Cole Trapnell's Lab Dropbox/Nick Lammers/Nick/symmetry_breaking/pde/sweeps/")
     # Settings
     use_random = True  # or False for full grid
-    n_workers = 28 #np.max([1, int(mp.cpu_count() / 2.1)])
+    n_workers = 12 #np.max([1, int(mp.cpu_count() / 2.1)])
     grid_type = "lhs" #"random" if use_random else "grid"
     n_samples = 100000
 
@@ -41,7 +41,7 @@ if __name__ == "__main__":
         "sigma_L": np.logspace(-1, 1, 8),
         # "K_rho": np.logspace(1.81, 3.81, 10),
         "K_I": np.logspace(1, 3, 8),
-        "alpha_N": np.linspace(0.46, 5, 8),
+        # "alpha_N": np.linspace(0.46, 5, 8),
         "mu_L": np.logspace(-4.3, -2, 8),
         "N_amp": np.logspace(1, 4, 8),
         "N_sigma": np.logspace(1, 2, 3),
@@ -50,11 +50,13 @@ if __name__ == "__main__":
     static_params = {
                       "sigma_N": 10.0,  # Nodal auto-activation
                       # "sigma_L": 0.1,  # Lefty production
-                      "D0_N": 60.0,
-                      "D0_L": 60.0,
+                      "D0_N": 1.85,
+                      "D0_L": 15.0,
+                      "no_density_dependence": True,
                       # "mu_N": 1.11e-4,
                       # "mu_L": 0.61e-4,
-                      "alpha_L": 0.46,
+                      "alpha_L": 0,
+                      "alpha_N": 0,
                       "tau_rho": 3600,
                       "n": 2,
                       "m": 1,

@@ -18,13 +18,13 @@ output_file = "sweep_results.csv"
 if __name__ == "__main__":
     import multiprocessing as mp
     from pathlib import Path
-    sweep_name = "sweep02_neutralization_v2"
+    sweep_name = "sweep03_extinction"
     root = Path("/media/nick/hdd021/Cole Trapnell's Lab Dropbox/Nick Lammers/Nick/symmetry_breaking/pde/sweeps/")
     # Settings
-    use_random = True  # or False for full grid
+    # use_random = True  # or False for full grid
     n_workers = 28 #np.max([1, int(mp.cpu_count() / 2.1)])
-    grid_type = "lhs" #"random" if use_random else "grid"
-    n_samples = 100000
+    grid_type = "grid" #"random" if use_random else "grid"
+    n_samples = 2500
 
     # hyperparams
     dx = 10
@@ -33,46 +33,40 @@ if __name__ == "__main__":
     # dt = 0.5 * dx ** 2 /60 / 1.25 # Stability condition for diffusion
 
     param_grid = {
-        # "sigma_L": np.logspace(-2, 0, 10),
-        # "sigma_N": np.logspace(0, 2, 10),
-        "K_NL": np.logspace(1, 3, 8),
-        "K_A": np.logspace(2, 4, 8),
-        "K_R": np.logspace(1, 3, 8),
-        "sigma_L": np.logspace(-1, 1, 8),
-        # "K_rho": np.logspace(1.81, 3.81, 10),
-        "K_I": np.logspace(1, 3, 8),
-        "alpha_N": np.linspace(0.46, 5, 8),
-        "mu_L": np.logspace(-4.3, -2, 8),
-        "N_amp": np.logspace(1, 4, 8),
-        "N_sigma": np.logspace(1, 2, 3),
+        "N_amp": np.linspace(0.1, 12000, 50),
+        "L_value": np.linspace(0.1, 12000, 50),
     }
 
     static_params = {
-                      "sigma_N": 10.0,  # Nodal auto-activation
-                      # "sigma_L": 0.1,  # Lefty production
-                      "D0_N": 60.0,
-                      "D0_L": 60.0,
-                      # "mu_N": 1.11e-4,
-                      # "mu_L": 0.61e-4,
-                      "alpha_L": 0.46,
-                      "tau_rho": 3600,
-                      "n": 2,
-                      "m": 1,
-                      "p": 2,
-                      "q": 2,
-                      # "N_amp":5000,
-                      # "N_sigma":50.0,
-                    }
+        'K_NL': 138.9495494373,
+        'K_A': 193.0697728883,
+        # 'K_R': 19.3069772888,
+        'K_I': 19.3069772888,
+        'mu_L': 0.0002275846,
+        'N_sigma': 30,
+        'sigma_N': 10.0,
+        'sigma_L': 10.0,
+        'D0_N': 1.85,
+        'D0_L': 15.0,
+        'alpha_L': 0,
+        'alpha_N': 0,
+        'tau_rho': 3600,
+        'n': 2,
+        'm': 1,
+        'p': 2,
+        'q': 2,
+        "no_density_dependence": True,
+        "L_init": "constant"
+    }
 
-    # Simulation config (you can also pass this from CLI)
     sim_config = {
-                    "dx": dx,
-                    "L": L,
-                    "T": T,
-                    "model_class": NodalLeftyNeutralization1D,
-                    "tracker_class": NodalROITracker,
-                    "interval": 1000,
-                }
+        "dx": dx,
+        "L": L,
+        "T": T,
+        "model_class": NodalLeftyNeutralization1D,
+        "tracker_class": NodalROITracker,
+        "interval": 300,
+    }
 
     # --- compute CFL-safe dt once (using max D0) ---
     # dx = 10

@@ -37,10 +37,11 @@ class NodalLeftyNeutralization1D(PDEBase):
                  sigma_N=1.0, sigma_L=1e-2,
                  mu_ratio=1.11e-4/0.61e-4,  # ratio of mu_N to mu_L
                  mu_L=0.61e-4,
+                 no_density_dependence=False,  # if True, set alpha_N=alpha_L=0
                  # Hill parameters and thresholds
-                 n=2, m=2, p=2, q=2,
+                 n=2, m=1, p=2, q=2,
                  K_A=100.0,      # N auto-activation threshold
-                 K_R=100.0,      # kept for API parity; unused in neutralization
+                 # K_R=100.0,      # kept for API parity; unused in neutralization
                  K_NL=100.0,     # N -> L activation threshold
                  K_rho=100.0,    # P(N) threshold
                  K_P=None,       # optional alias: if provided, overrides K_NL
@@ -64,8 +65,8 @@ class NodalLeftyNeutralization1D(PDEBase):
         # Transport
         self.D0_N = D0_N
         self.D0_L = D0_L
-        self.alpha_N = alpha_N
-        self.alpha_L = alpha_L
+        self.alpha_N = alpha_N if not no_density_dependence else 0.0
+        self.alpha_L = alpha_L if not no_density_dependence else 0.0
 
         # Kinetics
         self.sigma_N = sigma_N
@@ -79,7 +80,7 @@ class NodalLeftyNeutralization1D(PDEBase):
         self.p = p
         self.q = q
         self.K_A = K_A
-        self.K_R = K_R
+        # self.K_R = K_R
         self.K_NL = K_P if K_P is not None else K_NL
         self.K_rho = K_A if lock_rho_K else K_rho
 
@@ -88,6 +89,7 @@ class NodalLeftyNeutralization1D(PDEBase):
         self.apply_to_L = apply_to_L
 
         # Density model
+        self.no_density_dependence = no_density_dependence
         self.rho_max = rho_max
         self.eps_rho = eps_rho if eps_rho is not None else 0.05 * rho_max
         self.tau_rho = tau_rho
@@ -118,16 +120,21 @@ class NodalLeftyNeutralization1D(PDEBase):
         phi.data = np.clip(phi.data, phi_min, 1.0)
         return phi
 
-    def D_N(self, rho: ScalarField) -> ScalarField:
+    def D_N(self, rho):
+        if self.no_density_dependence:
+            return ScalarField(rho.grid, data=self.D0_N)
         return self.D0_N * (self.porosity(rho) ** self.alpha_N)
 
-    def D_L(self, rho: ScalarField) -> ScalarField:
+    def D_L(self, rho):
+        if self.no_density_dependence:
+            return ScalarField(rho.grid, data=self.D0_L)
         return self.D0_L * (self.porosity(rho) ** self.alpha_L)
 
     # ---------- PDE core ----------
     def evolution_rate(self, state: FieldCollection, t: float = 0.0) -> FieldCollection:
         N, L, rho = state  # ScalarFields
 
+        rho_scale = 1.0 if self.no_density_dependence else (rho / self.rho_max)
         # Lefty neutralization: fast binding reduces signaling-competent N
         # N_free used ONLY in activation terms; diffusion/decay act on total N
         # I = 1.0 + (L / self.K_I) ** self.m
@@ -136,9 +143,9 @@ class NodalLeftyNeutralization1D(PDEBase):
         N_free = self._free_nodal_from_binding(N, L)
 
         # Production terms (density-scaled)
-        N_act = (rho / self.rho_max) * self.sigma_N * (N_free ** self.n) / (self.K_A ** self.n + N_free ** self.n)
+        N_act = rho_scale * self.sigma_N * (N_free ** self.n) / (self.K_A ** self.n + N_free ** self.n)
         L_arg = N_free if self.apply_to_L else N
-        L_prod = (rho / self.rho_max) * self.sigma_L * (L_arg ** self.p) / (self.K_NL ** self.p + L_arg ** self.p)
+        L_prod = rho_scale * self.sigma_L * (L_arg ** self.p) / (self.K_NL ** self.p + L_arg ** self.p)
 
         # Physical loss (on total fields)
         N_loss = self.mu_N * N
@@ -158,7 +165,7 @@ class NodalLeftyNeutralization1D(PDEBase):
         P_N = self.rho_max * (N ** self.q) / (self.K_rho ** self.q + N ** self.q)
         rho_relax = (P_N - rho) / self.tau_rho
         rho_diff = self.D_rho * rho.laplace(self.bc)  # note: ∂ρ/∂t = ... - D_ρ ∇²ρ per LaTeX
-        drho_dt = rho_relax - rho_diff
+        drho_dt = rho_relax + rho_diff
 
         # Assemble RHS
         dN_dt = N_act - N_loss + diff_N
