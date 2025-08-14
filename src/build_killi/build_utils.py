@@ -311,6 +311,8 @@ def image_fusion_wrapper(root, project_name, out_root=None, overwrite=False, par
         fused_image_zarr_path = os.path.join(out_root, "built_data", "zarr_image_files", project_name + "_fused.zarr")
     fused_image_zarr = zarr.open(fused_image_zarr_path, mode='a', shape=full_shape, dtype=np.uint16, chunks=chunksize)
 
+    for key, val in image_zarr1.attrs.items():
+        fused_image_zarr.attrs[key] = val
     # check which indices to write
     # get all indices
     all_indices = set(range(start_i, stop_i))

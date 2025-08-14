@@ -33,7 +33,7 @@ def align_frames(t, data_zyx, interval, nucleus_channel):
         data_zyx0,
         data_zyx1,
         normalization=None,
-        upsample_factor=1,
+        upsample_factor=5,
         overlap_ratio=0.7,
     )
 
@@ -79,7 +79,7 @@ def get_timeseries_shifts(root, project_name, interval=1, nucleus_channel=1, cal
     shift_array_interp[:, 2] = interp2(frame_vec)
 
     # we need to adjust for frame interval
-    shift_frames = np.asarray([0] + list(frames_to_register + interval + 1))
+    shift_frames = np.asarray([0] + list(frames_to_register + interval))
     frame_deltas = np.diff(shift_frames)
     frame_deltas_full = np.repeat(frame_deltas, frame_deltas)
 

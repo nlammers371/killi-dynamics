@@ -171,7 +171,7 @@ def fuse_wrapper(root, project_prefix, overwrite=False, par_flag=False, dist_thr
     if n_workers is None:
         total_cpus = multiprocessing.cpu_count()
         # Limit yourself to 33% of CPUs (rounded down, at least 1)
-        n_workers = max(1, total_cpus // 3)
+        n_workers = max(1, total_cpus // 4)
 
     # get project names 
     project1 = project_prefix + "_side1"

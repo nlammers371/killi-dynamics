@@ -10,4 +10,4 @@ if __name__ == "__main__":
 
     # call function
     print("Integrating fluorescence for project:", project_name)
-    integrate_fluorescence_wrapper(root, project_name, fluo_channel=0, par_flag=False, overwrite=False, n_workers=12)
+    integrate_fluorescence_wrapper(root, project_name, fluo_channel=0, par_flag=True, overwrite=True, n_workers=12)
