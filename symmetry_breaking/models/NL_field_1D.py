@@ -41,7 +41,8 @@ class NodalLeftyField1D(PDEBase):
                  stoch_N_mode="direct",
                  stoch_to_L=False, rate_L=0.0, amp_median_L=1.0, amp_sigma_L=0.5,
                  stoch_L_mode="direct",
-                 sigma_x=30, tau_impulse=1.0):
+                 sigma_x=30, tau_impulse=1.0,
+                 blip_logger=None):
         super().__init__()
 
         # Diffusion
@@ -99,6 +100,9 @@ class NodalLeftyField1D(PDEBase):
         self.sigma_x = sigma_x
         self.tau_impulse = tau_impulse
 
+        # Pulse logging
+        self.blip_logger = blip_logger
+
         # Internal trigger state
         self._t_prev = None
         self._det_N_fired = False
@@ -151,12 +155,12 @@ class NodalLeftyField1D(PDEBase):
             if self.stoch_to_N and self.rate_N > 0.0:
                 self._sample_spikes(field=N, F_accum=self._F_N, dt=dt, length=length,
                                     rate=self.rate_N, amp_median=self.amp_median_N, amp_sigma=self.amp_sigma_N,
-                                    sigma_x=self.sigma_x, mode=self.stoch_N_mode)
+                                    sigma_x=self.sigma_x, mode=self.stoch_N_mode, t=t)
 
             if self.stoch_to_L and self.rate_L > 0.0:
                 self._sample_spikes(field=L, F_accum=self._F_L, dt=dt, length=length,
                                     rate=self.rate_L, amp_median=self.amp_median_L, amp_sigma=self.amp_sigma_L,
-                                    sigma_x=self.sigma_x, mode=self.stoch_L_mode)
+                                    sigma_x=self.sigma_x, mode=self.stoch_L_mode, t=t)
 
         # ---------------- Reaction terms ----------------
         N_free = self._free_nodal_from_binding(N, L)
@@ -284,7 +288,7 @@ class NodalLeftyField1D(PDEBase):
         else:
             raise ValueError(f"Unrecognized trigger mode: {mode}")
 
-    def _sample_spikes(self, field, F_accum, dt, length, rate, amp_median, amp_sigma, sigma_x, mode):
+    def _sample_spikes(self, field, F_accum, dt, length, rate, amp_median, amp_sigma, sigma_x, mode, t):
         """Draw Poisson number of spikes and deposit them either as direct jumps (J) or impulse (F)."""
         N_events = self.rng.poisson(rate * length * dt)
         if N_events == 0:
@@ -296,15 +300,28 @@ class NodalLeftyField1D(PDEBase):
             if mode == "direct":
                 label = getattr(field, "label", "")
                 target = self._J_N if "Nodal" in label else self._J_L
-                self._add_gaussian_bump(target, Ai, sigma_x, center=xi)
+                channel = "Activator" if "Nodal" in label else "Repressor"
+                self._add_gaussian_bump(target, Ai, sigma_x, center=xi, channel=channel, t=t)
             elif mode == "impulse":
-                self._add_gaussian_bump(F_accum, Ai, sigma_x, center=xi)
+                label = getattr(field, "label", "")
+                channel = "Activator" if "Nodal" in label else "Repressor"
+                self._add_gaussian_bump(F_accum, Ai, sigma_x, center=xi, channel=channel, t=t)
             else:
                 raise ValueError(f"Unrecognized stochastic mode: {mode}")
 
-    def _add_gaussian_bump(self, target_field, amp, sigma, center="center"):
+    def _add_gaussian_bump(self, target_field, amp, sigma, t, center="center", channel="Activator"):
         """Add a Gaussian bump with PEAK = amp (no area normalization)."""
         x = target_field.grid.axes_coords[0]
         x0 = 0.5 * (x[0] + x[-1]) if center == "center" else float(center)
         kernel = np.exp(-((x - x0) ** 2) / (2 * sigma ** 2))
         target_field.data += amp * kernel
+
+        # Log the event
+        if self.blip_logger is not None:
+            self.blip_logger.append({
+                "time": float(t),  # current simulation time
+                "channel": channel,  # "Repressor" for Lefty
+                "x": float(x0),  # center position of the blip
+                "amp": float(amp),  # amplitude you injected
+                "sigma": float(sigma) if sigma is not None else None
+            })
