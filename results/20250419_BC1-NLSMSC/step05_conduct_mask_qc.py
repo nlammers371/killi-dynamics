@@ -10,12 +10,12 @@ if __name__ == '__main__':
     root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\"
 
     # side 1
-    project_name = "20250419_BC1-NLSMSC_side1"
-    mask_qc_wrapper(root, project_name, par_flag=True, overwrite=True)
-
-    # side 2
-    project_name = "20250419_BC1-NLSMSC_side2"
-    mask_qc_wrapper(root, project_name, par_flag=True, overwrite=True)
+    # project_name = "20250419_BC1-NLSMSC_side1"
+    # mask_qc_wrapper(root, project_name, par_flag=True, overwrite=True)
+    #
+    # # side 2
+    # project_name = "20250419_BC1-NLSMSC_side2"
+    # mask_qc_wrapper(root, project_name, par_flag=True, overwrite=True)
 
     # Fuse masks
     project_name = "20250419_BC1-NLSMSC"
