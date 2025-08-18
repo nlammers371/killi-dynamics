@@ -74,6 +74,7 @@ def build_mask_feature_wrapper(root, project_name, tracking_config, well_num=0, 
     for f in tqdm(df_list, "Loading feature files", unit="file"):
         df = pd.read_csv(f)
         feature_df_list.append(df)
+
     # concatenate
     feature_df = pd.concat(feature_df_list, ignore_index=True)
     feature_df.to_csv(save_path + "mask_features.csv", index=False)

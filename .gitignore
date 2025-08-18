@@ -6,7 +6,7 @@ functions/.ipynb_checkpoints/
 src/functions/.ipynb_checkpoints/
 jupyter/.ipynb_checkpoints/
 src/functions/__pychache__/
-visualization/__pychache__/
+results/20250217/visualization/__pychache__/
 .idea/
 src/__pycache__/
 src/functions/__pycache__/
@@ -22,7 +22,7 @@ src/vae/trainers/__pycache__/
 src/vae/auxiliary_scripts/__pycache__/
 src/vae/trainers/base_trainer/__pycache__/
 
-visualization/__pycache__/*
+results/20250217/visualization/__pycache__/*
 
 **/__pycache__/
 **/__pycache__/*.pyc
