@@ -5,7 +5,8 @@ class NodalROITracker(TrackerBase):
     def __init__(self, grid, roi_width=500, interval=10,
                  save_profiles=True, store_every=None,  # None => only final; int => every Nth handle
                  downsample=None, dtype=np.float32,
-                 field_labels=("Activator", "Repressor", "rho")):
+                 field_labels=("Activator", "Repressor", "rho"),
+                 blip_logger=None):  # <--- NEW: shared event list
         super().__init__()
 
         self.interval = int(interval)
@@ -39,13 +40,33 @@ class NodalROITracker(TrackerBase):
         self.N_roi_init = None
         self.N_max_init = None
 
+        # pulse logging
+        self._blip_logger = blip_logger if blip_logger is not None else []
+        self._blip_cursor = 0  # keeps track of how many events we've already read
+
+        self.pulses = {
+            "Activator": {"time": [], "x": [], "size": [], "sigma": [], "mode": []},
+            "Repressor": {"time": [], "x": [], "size": [], "sigma": [], "mode": []},
+        }
+
         # raw profile storage
         self.profiles = {}            # final profiles (numpy arrays)
         self.profile_history = {}     # only used if store_every is set
 
         self._last_state = None
-
         self.profile_history = {name: [] for name in self.field_labels}
+
+        # --- NEW: pulse logging support ---
+        # Expect a list of dicts appended by the PDE like:
+        # {"time": t, "channel": "Activator"|"Repressor", "x": x0, "amp": A, "sigma": s, "mode":"impulse"|"direct"}
+        self._blip_logger = blip_logger if blip_logger is not None else []
+        self._blip_cursor = 0  # index of the next unseen event
+
+        # store pulses by channel
+        self.pulses = {
+            "Activator": {"time": [], "x": [], "size": [], "sigma": [], "mode": []},
+            "Repressor": {"time": [], "x": [], "size": [], "sigma": [], "mode": []},
+        }
 
     def _extract_profiles(self, state):
         """Return dict of raw numpy arrays (downsampled, dtype applied)."""
@@ -56,13 +77,31 @@ class NodalROITracker(TrackerBase):
             arr = np.array(field.data)
             if self.downsample and self.downsample > 1:
                 arr = arr[::self.downsample]
-            # ensure numeric array with desired dtype
-            arr = np.asarray(arr, dtype=self.dtype)
+            arr = np.asarray(arr, dtype=self.dtype)  # ensure numeric array with desired dtype
             out[name] = arr
         return out
 
+    def _ingest_new_pulses(self):
+        """Read new entries from the shared blip logger and store them."""
+        new_entries = self._blip_logger[self._blip_cursor:]
+        if not new_entries:
+            return
+
+        for ev in new_entries:
+            ch = "Activator" if str(ev.get("channel", "")).lower().startswith(("a", "n")) else "Repressor"
+            self.pulses[ch]["time"].append(float(ev.get("time", np.nan)))
+            self.pulses[ch]["x"].append(float(ev.get("x", np.nan)))
+            self.pulses[ch]["size"].append(float(ev.get("amp", ev.get("size", np.nan))))
+            self.pulses[ch]["sigma"].append(float(ev.get("sigma", np.nan)) if ev.get("sigma") is not None else np.nan)
+            self.pulses[ch]["mode"].append(ev.get("mode", ""))
+
+        self._blip_cursor += len(new_entries)
+
     def handle(self, state, time):
         self._last_state = state
+
+        # --- NEW: first, ingest any new pulses that occurred up to this handle ---
+        self._ingest_new_pulses()
 
         # --- metrics every self.interval steps ---
         if (self.counter % self.interval) == 0:
@@ -100,18 +139,20 @@ class NodalROITracker(TrackerBase):
 
         self.counter += 1
 
-    # py-pde 0.35 passes finalize(info=...), so accept **kwargs
     def finalize(self, **kwargs):
-        if self.save_profiles:
-            # state = self._last_state
-            # if state is not None:
-            #     self.profiles = self._extract_profiles(state)
-            # also expose the x-grid used for profiles
-            # self.profiles["x"] = np.asarray(self.x, dtype=self.dtype)
+        # Ingest any pulses appended after the last handle() call
+        self._ingest_new_pulses()
 
+        if self.save_profiles:
             self.profiles = {k: np.stack(v, axis=0) for k, v in self.profile_history.items()}
             self.profiles["x"] = self.x
             self.profiles["times"] = np.asarray(self.times, dtype=self.dtype)
+
+        # Convert pulse lists to numpy arrays for convenience
+        for ch in ("Activator", "Repressor"):
+            for key in ("time", "x", "size", "sigma"):
+                self.pulses[ch][key] = np.asarray(self.pulses[ch][key], dtype=float)
+            # mode stays as list of strings
 
     def get_metrics(self):
         """Return lightweight scalars ONLY (no arrays -> pandas-safe)."""
@@ -121,19 +162,53 @@ class NodalROITracker(TrackerBase):
             "max_fold_change": (self.fold_change_in_max[-1] if self.fold_change_in_max else None),
         }
 
-    # helpers you can call after solve()
     def get_profiles(self):
-        """Final profiles: dict of numpy arrays (e.g., {'Activator':..., 'Repressor':..., 'rho':..., 'x':...})."""
+        """Final profiles and time grid used for them."""
         return self.profiles
 
+    # --- NEW: expose pulses for post-hoc analysis ---
+    def get_pulses(self, channel=None, as_dict=True):
+        """
+        Return logged pulses.
+        - channel: None => both; "Activator" or "Repressor" for one channel.
+        - as_dict=True => nested dict; False => (times, x, size, sigma, mode) tuple(s).
+        """
+        if channel is None:
+            return self.pulses if as_dict else (
+                (self.pulses["Activator"]["time"], self.pulses["Activator"]["x"],
+                 self.pulses["Activator"]["size"], self.pulses["Activator"]["sigma"],
+                 self.pulses["Activator"]["mode"]),
+                (self.pulses["Repressor"]["time"], self.pulses["Repressor"]["x"],
+                 self.pulses["Repressor"]["size"], self.pulses["Repressor"]["sigma"],
+                 self.pulses["Repressor"]["mode"])
+            )
+        ch = "Activator" if channel.lower().startswith(("a", "n")) else "Repressor"
+        return self.pulses[ch] if as_dict else (
+            self.pulses[ch]["time"], self.pulses[ch]["x"],
+            self.pulses[ch]["size"], self.pulses[ch]["sigma"],
+            self.pulses[ch]["mode"]
+        )
+
     def save_npz(self, path):
-        """Persist final profiles (and optional history) to a compressed .npz file."""
+        """Persist final profiles, history, and pulses to a compressed .npz file."""
         payload = {}
-        # final
+        # final profiles
         for k, v in self.profiles.items():
             payload[f"final/{k}"] = v
         # history (optional)
         for k, lst in self.profile_history.items():
             if lst:
                 payload[f"history/{k}"] = np.stack(lst, axis=0)  # (T_snapshots, X)
+        # pulses
+        for ch in ("Activator", "Repressor"):
+            payload[f"pulses/{ch}/time"] = np.asarray(self.pulses[ch]["time"])
+            payload[f"pulses/{ch}/x"] = np.asarray(self.pulses[ch]["x"])
+            payload[f"pulses/{ch}/size"] = np.asarray(self.pulses[ch]["size"])
+            payload[f"pulses/{ch}/sigma"] = np.asarray(self.pulses[ch]["sigma"])
+            # store mode as a fixed-width string array to keep .npz simple
+            if len(self.pulses[ch]["mode"]) > 0:
+                payload[f"pulses/{ch}/mode"] = np.array(self.pulses[ch]["mode"], dtype="U16")
+            else:
+                payload[f"pulses/{ch}/mode"] = np.array([], dtype="U16")
+
         np.savez_compressed(path, **payload)
