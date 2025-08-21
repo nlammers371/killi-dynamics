@@ -3,5 +3,5 @@
   <component name="Black">
     <option name="sdkName" value="turing-pde-env" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="turing-pde-env" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="$USER_HOME$/miniforge3/envs/symmetry-env" project-jdk-type="Python SDK" />
 </project>

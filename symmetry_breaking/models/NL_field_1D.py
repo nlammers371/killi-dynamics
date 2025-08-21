@@ -23,6 +23,7 @@ class NodalLeftyField1D(PDEBase):
                  mu_ratio=1.11e-4/0.61e-4, mu_L=0.61e-4,
                  # Hill / neutralization parameters
                  n=2, m=1, p=2, q=2,
+                 alpha=1.0,  # inhibitor effect
                  K_A=100.0, K_NL=100.0,
                  K_I=100.0, apply_to_L=True,
                  # Density params (passive)
@@ -72,6 +73,9 @@ class NodalLeftyField1D(PDEBase):
         self.eps_rho = eps_rho if eps_rho is not None else 0.05 * rho_max
         self.tau_rho = tau_rho
         self.D_rho = D_rho
+
+        # Inhibitor effects
+        self.alpha = float(np.clip(alpha, 0.0, 1.0))
 
         # Numerics
         self.bc = bc
@@ -137,13 +141,13 @@ class NodalLeftyField1D(PDEBase):
 
         # ---------------- Deterministic triggers ----------------
         if self.N_t_init is not None and not self._det_N_fired and self._t_prev is not None and self._t_prev < self.N_t_init <= t:
-            self._apply_trigger(field=N, F_accum=self._F_N, mode=self.det_N_mode,
+            self._apply_trigger(field=N, F_accum=self._F_N, mode=self.det_N_mode, t=t,
                                 amp=self.N_t_amp if self.N_t_amp is not None else self.N_amp,
                                 sigma=self.N_t_sigma if self.N_t_sigma is not None else self.N_sigma)
             self._det_N_fired = True
 
         if self.L_t_init is not None and not self._det_L_fired and self._t_prev is not None and self._t_prev < self.L_t_init <= t:
-            self._apply_trigger(field=L, F_accum=self._F_L, mode=self.det_L_mode,
+            self._apply_trigger(field=L, F_accum=self._F_L, mode=self.det_L_mode, t=t,
                                 amp=self.L_t_amp if self.L_t_amp is not None else self.L_value,
                                 sigma=self.L_t_sigma if self.L_t_sigma is not None else self.N_sigma)
             self._det_L_fired = True
@@ -163,10 +167,11 @@ class NodalLeftyField1D(PDEBase):
                                     sigma_x=self.sigma_x, mode=self.stoch_L_mode, t=t)
 
         # ---------------- Reaction terms ----------------
-        N_free = self._free_nodal_from_binding(N, L)
+        N_free = self._free_nodal_from_binding(N, L)  # Lefty repression
+        N_eff = N_free * self.alpha  # Inhibitor effect
 
-        N_act = self.sigma_N * (N_free ** self.n) / (self.K_A ** self.n + N_free ** self.n)
-        L_arg = N_free if self.apply_to_L else N
+        N_act = self.sigma_N * (N_eff ** self.n) / (self.K_A ** self.n + N_eff ** self.n)
+        L_arg = N_eff if self.apply_to_L else N  # NOTE: this is weird in False case currently
         L_prod = self.sigma_L * (L_arg ** self.p) / (self.K_NL ** self.p + L_arg ** self.p)
 
         N_loss = self.mu_N * N
@@ -270,21 +275,17 @@ class NodalLeftyField1D(PDEBase):
         np.clip(N_free, 0.0, Nt, out=N_free)
         return ScalarField(N.grid, N_free)
 
-    def _apply_trigger(self, field, F_accum, mode, amp, sigma):
+    def _apply_trigger(self, field, F_accum, mode, amp, sigma, t):
         """Route triggers to either impulse accumulator or per-step direct jump."""
+        label = getattr(field, "label", "")
+        is_nodal = "Nodal" in label
+        channel = "Activator" if is_nodal else "Repressor"
+
         if mode == "direct":
-            # deposit into the correct per-step jump buffer
-            label = getattr(field, "label", "")
-            if "Nodal" in label:
-                target = self._J_N
-            elif "Lefty" in label:
-                target = self._J_L
-            else:
-                raise ValueError(f"Unknown field label for direct trigger: {label!r}")
-            self._add_gaussian_bump(target, amp, sigma)
+            target = self._J_N if is_nodal else self._J_L
+            self._add_gaussian_bump(target, amp, sigma, t=t, channel=channel)
         elif mode == "impulse":
-            # deposit into exponential-decay accumulator
-            self._add_gaussian_bump(F_accum, amp, sigma)
+            self._add_gaussian_bump(F_accum, amp, sigma, t=t, channel=channel)
         else:
             raise ValueError(f"Unrecognized trigger mode: {mode}")
 
