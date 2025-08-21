@@ -7,20 +7,18 @@ import numpy as np
 from joblib import dump, load
 
 if __name__ == "__main__":
-    # script to build features from mask zarr file
-    # At this point, should have tracked all relevant experiments
-
     # load zarr image file
     root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\"
-    project_name = "20240611_NLS-Kikume_24hpf_side2"  # "20250419_BC1-NLSMSC"
-    tracking_config = "tracking_jordao_20240918"  # "tracking_20250328_redux"
+    project_name = "20250419_BC1-NLSMSC"
+    tracking_config = "tracking_20250328_redux"
 
     start_i = 0
-    stop_i = 1600  # 614
+    stop_i = 614
     tracking_range = [start_i, stop_i]
     suffix = ""
     scale_vec = np.asarray([3.0, 0.85, 0.85])
     well_num = 0
+    par_flag = True
 
     print("Loading tracking data for project:", project_name)
     # load mask features

@@ -117,7 +117,11 @@ def calculate_li_trend(root, project_prefix, first_i=0, last_i=None, multiside_e
 
     return li_df_full
 
-def perform_li_segmentation(time_int, li_df, image_zarr, nuclear_channel, multichannel_flag, stack_zarr, aff_zarr, n_thresh=5):
+def perform_li_segmentation(time_int, li_df, image_zarr, nuclear_channel, multichannel_flag, stack_zarr,
+                            aff_zarr, preproc_flag=True, n_thresh=5, thresh_factors=None):
+
+    if thresh_factors is None:
+        thresh_factors = [0.75, 1.25]
 
     li_thresh = li_df.loc[time_int, "li_thresh"]
     # do the stitching
@@ -127,10 +131,13 @@ def perform_li_segmentation(time_int, li_df, image_zarr, nuclear_channel, multic
         image_array = np.squeeze(image_zarr[time_int, :, :, :])
 
     if np.any(image_array != 0):
+        if preproc_flag:
+            data_log_i, thresh_li = calculate_li_thresh(image_array, thresh_li=li_thresh)
+        else:
+            data_log_i = image_array.copy()
+            thresh_li = li_thresh
 
-        data_log_i, thresh_li = calculate_li_thresh(image_array, thresh_li=li_thresh)
-
-        thresh_range = np.linspace(thresh_li * 0.75, 1.25 * thresh_li, n_thresh)
+        thresh_range = np.linspace(thresh_li * thresh_factors[0], thresh_factors[1] * thresh_li, n_thresh)
 
         # perform stitching
         aff_mask, mask_stack = do_hierarchical_watershed(data_log_i, thresh_range=thresh_range)
@@ -158,7 +165,7 @@ def perform_li_segmentation(time_int, li_df, image_zarr, nuclear_channel, multic
     return seg_flag
 
 
-def calculate_li_thresh(image, LoG_sigma=1, gauss_sigma=None, thresh_li=None):
+def calculate_li_thresh(image, use_subsample=False, tol=None, initial_guess=None, LoG_sigma=1, gauss_sigma=None, thresh_li=None):
     
     if gauss_sigma is None:
         gauss_sigma = (1.33, 4, 4)
@@ -171,9 +178,15 @@ def calculate_li_thresh(image, LoG_sigma=1, gauss_sigma=None, thresh_li=None):
     data_log_i = ski.util.invert(data_log)
 
     if thresh_li is None:
-        data_log_i = extract_random_quadrant(data_log_i) # downsample
-        thresh_li = filters.threshold_li(data_log_i)
-    
+        if use_subsample:
+            data_log_i = extract_random_quadrant(data_log_i) # downsample
+        # initialize with otsu
+        if initial_guess is None:
+            initial_guess = ski.filters.threshold_otsu(data_log_i)
+        if tol is not None:
+            thresh_li = filters.threshold_li(data_log_i, tolerance=tol, initial_guess=initial_guess)
+        else:
+            thresh_li = filters.threshold_li(data_log_i, initial_guess=initial_guess)
     return data_log_i, thresh_li
 
 
@@ -260,7 +273,7 @@ def do_hierarchical_watershed(im_log, thresh_range, min_mask_size=15):
 
 
 def segment_nuclei(root, project_name, nuclear_channel=None, n_workers=None, par_flag=False, n_thresh=5,
-                   overwrite=False, last_i=None):
+                   overwrite=False, last_i=None, preproc_flag=True, thresh_factors=None):
 
     if n_workers is None:
         total_cpus = multiprocessing.cpu_count()
@@ -280,11 +293,10 @@ def segment_nuclei(root, project_name, nuclear_channel=None, n_workers=None, par
     #########
     print("Stitching data from " + project_name)
     image_zarr = zarr.open(zarr_path, mode="r")
-    multichannel_flag = False
+    channel_list = image_zarr.attrs["Channels"]
+    multichannel_flag = len(channel_list) > 1
     if nuclear_channel is None:
-        channel_list = image_zarr.attrs["Channels"]
-        if len(channel_list) > 1:
-            multichannel_flag = True
+        if multichannel_flag:
             nuclear_channel = [i for i in range(len(channel_list)) if ("H2B" in channel_list[i]) or ("nls" in channel_list[i])][0]
         else:
             nuclear_channel = 0
@@ -302,12 +314,13 @@ def segment_nuclei(root, project_name, nuclear_channel=None, n_workers=None, par
         dim_shape = image_zarr.shape[1:]
 
     # initialize zarr file to save mask hierarchy
-    stack_zarr = zarr.open(multi_mask_zarr_path, mode='a',
+    mode = "w" if overwrite else "a"
+    stack_zarr = zarr.open(multi_mask_zarr_path, mode=mode,
                                 shape=(image_zarr.shape[0],) + (n_thresh,) + dim_shape,
                                 dtype=np.uint16, chunks=(1, 1,) + dim_shape)
 
     # initialize zarr to save current best mask
-    aff_zarr = zarr.open(aff_mask_zarr_path, mode='a', shape=(image_zarr.shape[0],) + dim_shape,
+    aff_zarr = zarr.open(aff_mask_zarr_path, mode=mode, shape=(image_zarr.shape[0],) + dim_shape,
                               dtype=np.uint16, chunks=(1,) + dim_shape)
 
     # get all indices
@@ -343,7 +356,8 @@ def segment_nuclei(root, project_name, nuclear_channel=None, n_workers=None, par
 
     # iterate through time points
     li_thresh_call = partial(perform_li_segmentation, li_df=li_df, image_zarr=image_zarr, nuclear_channel=nuclear_channel,
-                             multichannel_flag=multichannel_flag, stack_zarr=stack_zarr, aff_zarr=aff_zarr, n_thresh=n_thresh)
+                             multichannel_flag=multichannel_flag, stack_zarr=stack_zarr, aff_zarr=aff_zarr,
+                             n_thresh=n_thresh, preproc_flag=preproc_flag, thresh_factors=thresh_factors)
 
     if par_flag:
         print("Conducting segmentation in parallel...")
@@ -359,7 +373,8 @@ def segment_nuclei(root, project_name, nuclear_channel=None, n_workers=None, par
 
 
 
-def estimate_li_thresh(root, project_name, interval=125, nuclear_channel=None, start_i=0, last_i=None, timeout=60*6):
+def estimate_li_thresh(root, project_name, interval=125, nuclear_channel=None, tol=None, initial_guess=None,
+                       start_i=0, last_i=None, timeout=60*6, use_subsample=False):
 
     # get raw data dir
     zarr_path = os.path.join(root, "built_data", "zarr_image_files", project_name + ".zarr")
@@ -372,10 +387,12 @@ def estimate_li_thresh(root, project_name, interval=125, nuclear_channel=None, s
     print("Stitching data from " + project_name)
     image_zarr = zarr.open(zarr_path, mode="r")
     multichannel_flag = False
+    channel_list = image_zarr.attrs["Channels"]
+    multichannel_flag = len(channel_list) > 1
     if nuclear_channel is None:
-        channel_list = image_zarr.attrs["Channels"]
+        # channel_list = image_zarr.attrs["Channels"]
         if len(channel_list) > 1:
-            multichannel_flag = True
+            # multichannel_flag = True
             nuclear_channel = \
             [i for i in range(len(channel_list)) if ("H2B" in channel_list[i]) or ("nls" in channel_list[i])][0]
         else:
@@ -396,7 +413,7 @@ def estimate_li_thresh(root, project_name, interval=125, nuclear_channel=None, s
             image_array = np.squeeze(image_zarr[time_int, :, :, :]).copy()
         try:
             # Runs calculate_li_thresh(image_array) with a timeout (in seconds)
-            result = func_timeout(timeout, calculate_li_thresh, args=(image_array,))
+            result = func_timeout(timeout, calculate_li_thresh, args=(image_array, use_subsample, tol, initial_guess))
             # Unpack the result as needed, for example:
             _, li_thresh = result
             li_vec.append(li_thresh)

@@ -13,8 +13,13 @@ import multiprocessing
 
 def align_halves(t, image_data1, image_data2, z_align_size=50, nucleus_channel=1):
 
-    data_zyx1 = np.squeeze(image_data1[t, nucleus_channel])
-    data_zyx2 = np.squeeze(image_data2[t, nucleus_channel])
+    multichannel = len(image_data2.shape) > 4
+    if multichannel:
+        data_zyx1 = np.squeeze(image_data1[t, nucleus_channel])
+        data_zyx2 = np.squeeze(image_data2[t, nucleus_channel])
+    else:
+        data_zyx1 = np.squeeze(image_data1[t])
+        data_zyx2 = np.squeeze(image_data2[t])
 
     # experiment with manual alignment
     data_zyx2_i = data_zyx2[::-1, :, ::-1]
