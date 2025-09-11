@@ -17,7 +17,9 @@ class NodalLeftyField1D(PDEBase):
 
     def __init__(self,
                  # Diffusion (constant coefficients)
-                 D_N=1.85, D_L=15.0,
+                 # D_N=1.85,
+                 D_L=15.0,
+                 D_ratio=1.85/15.0,  # D_N = D_L * D_ratio
                  # Production / decay / interactions
                  sigma_N=1.0, sigma_L=1e-2,
                  mu_ratio=1.11e-4/0.61e-4, mu_L=0.61e-4,
@@ -46,7 +48,7 @@ class NodalLeftyField1D(PDEBase):
         super().__init__()
 
         # Diffusion
-        self.D_N = D_N
+        self.D_N = D_L * D_ratio
         self.D_L = D_L
 
         # Kinetics
