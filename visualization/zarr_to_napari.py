@@ -1,23 +1,26 @@
-import napari
-import numpy as np
 import zarr
+import napari
 from pathlib import Path
+from src.build_killi.run02_segment_nuclei import calculate_li_thresh
+import numpy as np
 
+# zarr_path = Path("E:/Nick/Cole Trapnell's Lab Dropbox/Nick Lammers/Nick/killi_tracker/built_data/zarr_image_files/20241126_LCP1-NLSMSC.zarr")
+zarr_path = Path("I:/Nick/killi_tracker/built_data/zarr_image_files/20250729_LCP1-NLSMSC_side1.zarr")
+im_zarr = zarr.open(zarr_path, mode='r')
 
-# zarr_path = Path("I:\\Nick\\killi_tracker\\built_data\\zarr_image_files\\20250419_BC1-NLSMSC_fused.zarr")
-# zarr_path = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\built_data\\mask_stacks\\20250419_BC1-NLSMSC_mask_fused.zarr"
-zarr_path = "I:\\Nick\\killi_tracker\\built_data\\zarr_image_files\\20250419_BC1-NLSMSC_fused.zarr"
-# well_ind = 0
-# zarr_path = zarr_root / f"20251126_LCP1-NLSMSC.zarr"
-image_data = zarr.open(zarr_path, mode="r")
-# scale_vec = tuple([image_data.attrs['PhysicalSizeZ'],
-#                   image_data.attrs['PhysicalSizeY'],
-#                   image_data.attrs['PhysicalSizeX']])
+time_range = [500, 505]
+scale_vec = tuple([im_zarr.attrs['PhysicalSizeZ'], im_zarr.attrs['PhysicalSizeY'], im_zarr.attrs['PhysicalSizeX']])
 
-viewer = napari.Viewer(ndisplay=3)
-viewer.add_image(image_data[-4:], channel_axis=1, scale=(3, 0.85, 0.85))
-# viewer.add_labels(image_data[485:490], scale=(3, 0.85, 0.85))
+# thresh = 185 #200
+# im_plot = np.squeeze(im_zarr[time_range[0]:time_range[-1]+1, 1])
+im_plot = np.squeeze(im_zarr[time_range[0]:time_range[-1]+1])   # Assuming channel 0 is the nuclear channel
+# im_LoG, thresh = calculate_li_thresh(im_plot, thresh_li=1, use_subsample=False)
+
+viewer = napari.Viewer()
+# viewer.add_image(im_LoG, scale=scale_vec)
+viewer.add_image(im_plot, scale=scale_vec)
+# viewer.add_labels(im_LoG > 750, scale=scale_vec)
 
 if __name__ == '__main__':
     napari.run()
-    print("Pause")
+    print("Check")

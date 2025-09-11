@@ -13,7 +13,7 @@ os.environ["QT_API"] = "pyqt5"
 
 # get filepaths
 root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\"
-project = "20250311_LCP1-NLSMSC_side1"
+project = "20250419_BC1-NLSMSC"  # "20250311_LCP1-NLSMSC"  #  "20240611_NLS-Kikume_24hpf_side2"
 # project2 = "20250311_LCP1-NLSMSC_side2"
 zpath = os.path.join(root, "built_data", "zarr_image_files", project + ".zarr")
 mpath = os.path.join(root, "built_data", "mask_stacks", project + "_mask_clean.zarr")

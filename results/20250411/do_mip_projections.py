@@ -4,6 +4,9 @@ from tqdm import tqdm
 import zarr
 from dask.diagnostics import ProgressBar
 import dask.array as da
+from dask.distributed import Client
+client = Client(n_workers=24, threads_per_worker=1)
+
 
 def write_zarr(t, in_data, out_zarr, dim1=1):
     """
@@ -13,7 +16,7 @@ def write_zarr(t, in_data, out_zarr, dim1=1):
     out_zarr[t, dim1] = in_data[t]
     return True
 
-def calculate_mip(t, full_zarr, mip_zarr, axis=1):
+def calculate_mip(t, full_zarr, mip_zarr, dual_sided=True, axis=1):
     """
     Calculate the maximum intensity projection (MIP) of a zarr array along a specified axis.
     """

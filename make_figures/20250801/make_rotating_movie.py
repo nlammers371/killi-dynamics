@@ -10,6 +10,7 @@ from functools import partial
 from tqdm import tqdm
 import re
 
+
 def get_saved_frames(output_dir):
     saved = []
     pattern = re.compile(r'frame_(\d+)\.png')
@@ -19,8 +20,13 @@ def get_saved_frames(output_dir):
             saved.append(int(match.group(1)))
     return sorted(saved)
 
+
 def run_wrapper(chunk_i, frame_array, image_full, mask_full, initial_angle, zoom, output_dir,
-                        scale_vec, angle_vec, overwrite=False):
+                scale_vec, angle_vec, overwrite=False, overlay_name='lcp', overlay_contrast=None,
+                overlay_cmap='inferno'):
+
+    if overlay_contrast is None:
+        overlay_contrast = [135, 200]
 
     write_frames = frame_array[chunk_i]
 
@@ -28,9 +34,9 @@ def run_wrapper(chunk_i, frame_array, image_full, mask_full, initial_angle, zoom
     viewer = napari.Viewer(ndisplay=3)
 
     # Add the initial image layer using the first frame
-    layer0 = viewer.add_image(image_full[0, 1], name='lcp', rendering='mip', scale=scale_vec, contrast_limits=[0, 850])
-    layer1 = viewer.add_image(image_full[0, 0], name='lcp', rendering='mip', colormap='cyan', scale=scale_vec,
-                              contrast_limits=[135, 275], opacity=0.5)
+    layer0 = viewer.add_image(image_full[0, 1], name='NLS', rendering='mip', scale=scale_vec, contrast_limits=[0, 850])
+    layer1 = viewer.add_image(image_full[0, 0], name=overlay_name, rendering='mip', colormap=overlay_cmap, scale=scale_vec,
+                              contrast_limits=overlay_contrast, opacity=0.5)
 
     # Enable the built-in scale bar
     viewer.scale_bar.visible = True
@@ -79,20 +85,18 @@ def run_wrapper(chunk_i, frame_array, image_full, mask_full, initial_angle, zoom
                 dm, sdf = run_write_napari(frame, save_flag=False)
                 start_flag = False
                 prev_frame = frame
-            elif (frame-prev_frame) >= lim:
+            elif (frame - prev_frame) >= lim:
                 dm, sdf = run_write_napari(frame)
                 prev_frame = frame
             else:
                 _, _ = run_write_napari(frame, dist_mask=dm, sdf=sdf)
 
-
     viewer.close()
+
 
 def write_napari_frames(i, viewer, image_full, mask_full, layer1, layer0, initial_angle, output_dir,
                         scale_vec, angle_vec, zoom, X, Y, Z, save_flag=True,
-                        time_text_padding=20, start_hpf=26, tres=1.5/60, dist_mask=None, sdf=None):
-
-
+                        time_text_padding=20, start_hpf=26, tres=1.5 / 60, dist_mask=None, sdf=None):
     # Load the current 3D frame (a 3D stack)
     frame = image_full[i]
     mask_frame = mask_full[i]
@@ -110,7 +114,6 @@ def write_napari_frames(i, viewer, image_full, mask_full, layer1, layer0, initia
     if dist_mask is None:
         fitted_center, fitted_radius, _, _ = fit_sphere(points)
         ######
-
 
         # Assume im is your 3D volume (we only need its shape here)
         # nz, ny, nx = nls_frame.shape
@@ -131,15 +134,15 @@ def write_napari_frames(i, viewer, image_full, mask_full, layer1, layer0, initia
 
     f95 = np.percentile(nls_frame[mask_frame > 0], 75)  # mean of the inside sphere
     nls_norm = np.multiply(nls_frame.astype(np.float64), dist_mask)
-    lcp_norm = lcp_frame.copy()
-    if i < 1000:
-        lcp_o = 0.01
-    elif i < 1100:
-        lcp_o = (i - 1000) / 100 * 0.52  # linearly increase opacity from 0.01 to 1.0 over 100 frames
-        lcp_norm[sdf > 30] = 0
-    else:
-        lcp_o = 0.52
-        lcp_norm[sdf > 30] = 0
+    # lcp_norm = lcp_frame.copy()
+    # if i < 1000:
+    #     lcp_o = 0.01
+    # elif i < 1100:
+    #     lcp_o = (i - 1000) / 100 * 0.52  # linearly increase opacity from 0.01 to 1.0 over 100 frames
+    #     lcp_norm[sdf > 30] = 0
+    # else:
+    #     lcp_o = 0.52
+    #     lcp_norm[sdf > 30] = 0
 
     # viewer.add_image(nls_norm, scale=scale_vec, contrast_limits=[0, 850])
     # viewer.add_image(lcp_frame, scale=scale_vec, contrast_limits=[135, 200], colormap="green", opacity=0.6)
@@ -147,7 +150,7 @@ def write_napari_frames(i, viewer, image_full, mask_full, layer1, layer0, initia
     layer0.data = nls_norm
     layer0.contrast_limits = [0, f95]  # Update contrast limits to match the 95th percentile of the inside sphere
     layer1.data = lcp_frame
-    layer1.opacity = lcp_o
+    # layer1.opacity = lcp_o
 
     # Update the viewer's perspective by setting the camera roll.
     # This rotates the view (i.e. the perspective) about the Z axis without modifying the data.
@@ -177,13 +180,14 @@ def write_napari_frames(i, viewer, image_full, mask_full, layer1, layer0, initia
 
 
 if __name__ == "__main__":
-
     os.environ["QT_API"] = "pyqt5"
     overwrite = False
     # get filepaths
     root = "E:\\Nick\\Cole Trapnell's Lab Dropbox\\Nick Lammers\\Nick\\killi_tracker\\"
     # d_root = "D:\\Nick\\killi_tracker\\"
-    project = "20250311_LCP1-NLSMSC"
+    # project = "20250311_LCP1-NLSMSC"
+
+    project = "20250419_BC1-NLSMSC"
 
     zpath = os.path.join(root, "built_data", "zarr_image_files", project + "_fused.zarr")
     mpath = os.path.join(root, "built_data", "mask_stacks", project + "_mask_fused.zarr")
@@ -196,7 +200,11 @@ if __name__ == "__main__":
     os.makedirs(output_dir, exist_ok=True)
 
     # set params
-    initial_angle = (-3.8195498904405216, 8.89243987179023, 105.88077856425232)
+    initial_angle = (
+        -3.8195498904405216 + 20,  # elevation lifted by 20°
+        8.89243987179023,  # azimuth unchanged
+        105.88077856425232  # roll unchanged
+    )
     zoom = 0.58
     n_revs = 3
     frame_increment = 1
@@ -209,7 +217,8 @@ if __name__ == "__main__":
     n_workers = 8
     frame_slices = np.array_split(np.arange(0, num_frames, frame_increment), n_chunks)
 
-    scale_vec = tuple([image_full.attrs['PhysicalSizeZ'], image_full.attrs['PhysicalSizeY'], image_full.attrs['PhysicalSizeX']])
+    scale_vec = tuple(
+        [image_full.attrs['PhysicalSizeZ'], image_full.attrs['PhysicalSizeY'], image_full.attrs['PhysicalSizeX']])
 
     run_run_wrapper = partial(run_wrapper,
                               frame_array=frame_slices,
@@ -220,11 +229,12 @@ if __name__ == "__main__":
                               output_dir=output_dir,
                               scale_vec=scale_vec,
                               angle_vec=angle_vec,
-                              overwrite=overwrite)
+                              overwrite=overwrite,
+                              overlay_name='BC1',
+                              overlay_contrast=[150, 900],)
 
-
+    # run_run_wrapper(7)
     process_map(run_run_wrapper, range(n_chunks), max_workers=n_workers, chunksize=1)
-
 
     # napari.run()
 
