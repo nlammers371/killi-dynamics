@@ -1,64 +1,69 @@
 import numpy as np
 from scipy.signal import find_peaks
 
-def nd_to_dim(nd_params, anchors):
+def nd_to_dim(nd_params: dict, anchors: dict) -> dict:
     """
-    Convert a dictionary of ND params into dimension-full params.
+    Robust ND → dimensional conversion.
 
-    Parameters
-    ----------
-    nd_params : dict
-        ND parameters (beta_a, beta_r, rho_mu, delta,
-                       kappa_I, kappa_NL, a_amp, r_value, etc.)
-    anchors : dict
-        Absolute anchors:
-            mu_N : float  [1/s]
-            D_N  : float  [µm^2/s]
-            K_A  : float  [concentration units]
-            (optionally: K_I, K_NL, N_sigma, etc. if you want to override)
-
-    Returns
-    -------
-    dict : dimension-full parameters for NodalLeftyField1D
+    Required anchors: mu_N [1/s], D_N [µm^2/s], K_A [conc]
+    Recommend anchors: sigma_N_ref [conc/s] (fixes β_a), optional K_I (absolute)
     """
     mu_N = anchors["mu_N"]
-    D_N = anchors["D_N"]
-    K_A = anchors["K_A"]
+    D_N  = anchors["D_N"]
+    K_A  = anchors["K_A"]
 
-    out = {}
+    # --- β_a and σ_N ---
+    if "sigma_N_ref" in anchors:
+        sigma_N = float(anchors["sigma_N_ref"])
+        beta_a  = sigma_N / (mu_N * K_A)
+    else:
+        beta_a  = float(nd_params.get("beta_a", 1.0))
+        sigma_N = beta_a * mu_N * K_A
 
-    # Kinetics
-    out["sigma_N"] = nd_params.get("beta_a", 1.0) * mu_N * K_A
-    out["sigma_L"] = nd_params.get("beta_r", 1.0) * mu_N * K_A
-    out["mu_N"] = mu_N
-    out["mu_L"] = nd_params.get("rho_mu", 1.0) * mu_N
+    # --- β_r and σ_L ---
+    beta_r = float(nd_params.get("beta_r", beta_a))  # default: match σ_L=σ_N
+    sigma_L = beta_r * mu_N * K_A
 
-    # Diffusion
-    out["D_N"] = D_N
-    out["D_L"] = nd_params.get("delta", 1.0) * D_N
+    # --- decay & diffusion ---
+    rho_mu = float(nd_params.get("rho_mu", anchors.get("rho_mu", 1.0)))
+    mu_L = rho_mu * mu_N
+    delta = float(nd_params.get("delta", 1.0))
+    D_L = delta * D_N
 
-    # Binding constants
-    out["K_A"] = K_A
-    out["K_I"] = nd_params.get("kappa_I", 1.0) * K_A
-    out["K_NL"] = nd_params.get("kappa_NL", 1.0) * K_A
+    # --- binding constants ---
+    kappa_NL = float(nd_params.get("kappa_NL", 1.0))
+    K_NL = kappa_NL * K_A
+    if "K_I" in anchors:         # absolute override (strong-binding)
+        K_I = float(anchors["K_I"])
+    else:
+        kappa_I = float(nd_params.get("kappa_I", 1e-6))
+        K_I = kappa_I * K_A
 
-    # Hill exponents
-    for key in ["n", "m", "p", "q"]:
-        if key in nd_params:
-            out[key] = nd_params[key]
-
-    # Initial conditions
+    # --- initials ---
+    out = {
+        "sigma_N": sigma_N,
+        "sigma_L": sigma_L,
+        "mu_N": mu_N,
+        "mu_L": mu_L,
+        "D_N": D_N,
+        "D_L": D_L,
+        "K_A": K_A,
+        "K_I": K_I,
+        "K_NL": K_NL,
+    }
     if "a_amp" in nd_params:
-        out["N_amp"] = nd_params["a_amp"] * K_A
+        out["N_amp"] = float(nd_params["a_amp"]) * K_A
     if "r_value" in nd_params:
-        out["L_value"] = nd_params["r_value"] * K_A
+        out["L_value"] = float(nd_params["r_value"]) * K_A
 
-    # Pass through any extras (init modes, etc.)
-    for k in ["L_init", "N_sigma"]:
-        if k in anchors:
-            out[k] = anchors[k]
+    # pass-through
+    if "L_init" in anchors: out["L_init"] = anchors["L_init"]
+    if "N_sigma" in anchors: out["N_sigma"] = anchors["N_sigma"]
+    for k in ("n","m","p","q"):
+        if k in nd_params: out[k] = int(nd_params[k])
 
     return out
+
 
 
 def count_nodal_peaks_periodic(

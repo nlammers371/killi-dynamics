@@ -94,7 +94,7 @@ def make_param_dicts(param_grid, grid_type="grid", n_samples=1000, seed=42):
         n = n_samples
         idx_matrix = []
         for v in values:
-            idx = _lhs_indices(len(v), n, rng)   # stratified indices for this dim
+            idx = _lhs_indices(len(v), int(n), rng)   # stratified indices for this dim
             idx_matrix.append(idx)
         idx_matrix = np.stack(idx_matrix, axis=1)  # shape (n_samples, n_params)
         # Build param dicts by taking the i-th pick from each dimension

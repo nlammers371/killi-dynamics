@@ -19,10 +19,13 @@ class NodalLeftyField1D(PDEBase):
                  # Diffusion (constant coefficients)
                  # D_N=1.85,
                  D_L=15.0,
-                 D_ratio=1.85/15.0,  # D_N = D_L * D_ratio
+                 D_N=1.85,
+                 # D_ratio=1.85/15.0,  # D_N = D_L * D_ratio
                  # Production / decay / interactions
                  sigma_N=1.0, sigma_L=1e-2,
-                 mu_ratio=1.11e-4/0.61e-4, mu_L=0.61e-4,
+                 # rho_mu=1, #1.11e-4/0.61e-4,
+                 mu_N=1e-4,
+                 mu_L=1e-4,
                  # Hill / neutralization parameters
                  n=2, m=1, p=2, q=2,
                  alpha=1.0,  # inhibitor effect
@@ -49,14 +52,14 @@ class NodalLeftyField1D(PDEBase):
         super().__init__()
 
         # Diffusion
-        self.D_N = D_L * D_ratio
+        self.D_N = D_N  #D_L * D_ratio
         self.D_L = D_L
 
         # Kinetics
         self.sigma_N = sigma_N
         self.sigma_L = sigma_L
-        self.mu_N = mu_ratio * mu_L
-        self.mu_L = mu_L
+        self.mu_N = mu_N
+        self.mu_L = mu_L #mu_N * rho_mu
 
         # Hill params
         self.n = n
@@ -264,18 +267,46 @@ class NodalLeftyField1D(PDEBase):
             return ScalarField(grid, np.clip(base + noise, 0.0, self.rho_max))
         return ScalarField(grid, self.rho_value)
 
-    def _free_nodal_from_binding(self, N, L):
-        # Fast 1:1 binding: (N-C)(L-C) = Kd * C  with Kd = K_I
-        Kd = self.K_I
-        Nt = N.data
-        Lt = L.data
-        S = Nt + Lt + Kd
-        disc = S * S - 4.0 * Nt * Lt
-        np.maximum(disc, 0.0, out=disc)
-        C = 0.5 * (S - np.sqrt(disc))
-        N_free = Nt - C
-        np.clip(N_free, 0.0, Nt, out=N_free)
-        return ScalarField(N.grid, N_free)
+    def _free_nodal_from_binding(self, N, L, KI_tol=1e-9):
+        """
+        Fast 1:1 binding in dimensional units:
+            (N - C)(L - C) = K_I * C
+        Returns N_free = N - C (clipped to [0, N]).
+        """
+        KI = float(self.K_I)
+
+        Ndata = N.data if hasattr(N, "data") else np.asarray(N, dtype=np.float64)
+        Ldata = L.data if hasattr(L, "data") else np.asarray(L, dtype=np.float64)
+
+        Ndata = Ndata.astype(np.float64, copy=False)
+        Ldata = Ldata.astype(np.float64, copy=False)
+
+        # --- Strong-binding fast path (very small K_I):  C ≈ min(N, L), N_free ≈ max(N - L, 0)
+        if KI <= KI_tol:
+            N_free = np.maximum(Ndata - Ldata, 0.0, dtype=np.float64)
+            return type(N)(N.grid, N_free) if hasattr(N, "grid") else N_free
+
+        # --- Stable quadratic with S-scaling (prevents overflow in 2*N*L)
+        S = Ndata + Ldata + KI
+        S_safe = np.maximum(S, 1e-300)  # avoid divide-by-zero
+
+        # Work with dimensionless ratios; x in [0,1]
+        Ns = Ndata / S_safe
+        Ls = Ldata / S_safe
+        x = 4.0 * Ns * Ls
+        np.clip(x, 0.0, 1.0, out=x)
+
+        sqrt_term = np.sqrt(1.0 - x, dtype=np.float64)  # = sqrt(1 - 4NL/S^2)
+        # C = (2NL/S) / (1 + sqrt(1 - 4NL/S^2)) ; compute (2NL/S) as 2*(N/S)*L = 2*Ns*L
+        C = (2.0 * Ns * Ldata) / (1.0 + sqrt_term)
+
+        # Free activator
+        N_free = Ndata - C
+        # sanitize
+        np.nan_to_num(N_free, copy=False, nan=0.0, posinf=1e12, neginf=0.0)
+        np.clip(N_free, 0.0, Ndata, out=N_free)
+
+        return type(N)(N.grid, N_free) if hasattr(N, "grid") else N_free
 
     def _apply_trigger(self, field, F_accum, mode, amp, sigma, t):
         """Route triggers to either impulse accumulator or per-step direct jump."""
