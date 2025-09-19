@@ -12,13 +12,13 @@ import json
 # --------------------------------------------------
 if __name__ == "__main__":
 
-    sweep_name = "sweep02_jax_phase_space"
+    sweep_name = "sweep00_jax_stable_throttle"
     root = Path("/media/nick/hdd021/Cole Trapnell's Lab Dropbox/Nick Lammers/Nick/symmetry_breaking/pde/sweeps/")
     output_dir = ensure_output_dir(root / sweep_name)
 
     # Grid + sample settings
     grid_type = "lhs"
-    n_samples = 200**2  # adjust as needed
+    n_samples = 100000  # adjust as needed
 
     # --------------------------------------------------
     # Anchors (absolute values to set scale)
@@ -27,7 +27,7 @@ if __name__ == "__main__":
         "mu_N": 1e-4,         # [1/s]
         "D_N": 1.85,          # [µm^2/s]
         "K_A": 667,           # [concentration units]
-        "K_I": 1,             # [concentration units]
+        "K_I": 667,           # [concentration units]
         "L_init": "constant",
         "N_sigma": 25.0,
         "sigma_N_ref": 1.0,   # [conc units/s]
@@ -55,11 +55,11 @@ if __name__ == "__main__":
     # ND parameter grid (swept in ND space)
     # --------------------------------------------------
     param_grid = {
-        "beta_r_ratio": np.array([10]),
-        "kappa_NL": np.array([10]),
-        "delta": np.array([10]),
-        "a_amp": np.logspace(-3, 2, 200),
-        "r_value": np.logspace(-3, 2, 200),
+        "beta_r_ratio": np.logspace(-2, 2, 11),
+        "kappa_NL": np.logspace(-2, 2, 11),
+        "delta": np.logspace(0, 2, 10),
+        "a_amp": np.logspace(-1.5, 0, 10),
+        "r_value": np.concatenate(([0.0], np.logspace(-1.5, 0, 10))),
     }
     param_dicts = make_param_dicts(param_grid, grid_type=grid_type, n_samples=n_samples, seed=42)
 

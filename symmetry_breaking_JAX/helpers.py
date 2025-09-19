@@ -2,7 +2,6 @@ from symmetry_breaking_JAX.models.JAX_NL_1D import run_1d, Params1D, BlipSet1D, 
 import jax.numpy as jnp
 import numpy as np
 import os
-from pathlib import Path
 from typing import Union
 
 def split_numeric_and_static(params_list):
