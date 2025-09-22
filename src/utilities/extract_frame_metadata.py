@@ -73,32 +73,40 @@ def permute_nd2_axes(nd2_object):
     }
 
     # Get mapping from axis label to its position
-    axis_pos = {AXIS_MAP[k]: i for i, k in enumerate(axis_labels) if k in AXIS_MAP}
+    axis_names = {AXIS_MAP[k]: i for i, k in enumerate(axis_labels) if k in AXIS_MAP}
 
     # Now, access dimension sizes by name, safely!
-    n_wells = im_raw_dask.shape[axis_pos.get('well', 0)]  # default 0 if missing
-    n_channels = im_raw_dask.shape[axis_pos.get('channel', 0)]
-    n_time_points = im_raw_dask.shape[axis_pos.get('time', 0)]
-    n_z_slices = im_raw_dask.shape[axis_pos.get('z', 0)]
-    n_y = im_raw_dask.shape[axis_pos.get('y', 0)]
-    n_x = im_raw_dask.shape[axis_pos.get('x', 0)]
+    # n_wells = im_raw_dask.shape[axis_names.get('well', 0)]  # default 0 if missing
+    # n_channels = im_raw_dask.shape[axis_names.get('channel', 0)]
+    # n_time_points = im_raw_dask.shape[axis_names.get('time', 0)]
+    # n_z_slices = im_raw_dask.shape[axis_names.get('z', 0)]
+    # n_y = im_raw_dask.shape[axis_names.get('y', 0)]
+    # n_x = im_raw_dask.shape[axis_names.get('x', 0)]
 
     # print(f"wells={n_wells}, channels={n_channels}, time={n_time_points}, z={n_z_slices}, y={n_y}, x={n_x}")
 
     # Optional: Reorder to standard [well, channel, time, z, y, x]
     # Build permutation order
     std_order = ['well', 'channel', 'time', 'z', 'y', 'x']
-    permute = [axis_pos[a] for a in std_order if a in axis_pos]
+    permute = [axis_names[a] for a in std_order if a in axis_names]
 
     # Pad for missing axes (e.g., if not multipoint)
-    while len(permute) < 6:
-        permute.append(None)
+    # while len(permute) < 6:
+    #     permute.append(None)
 
     # Only transpose if axes are not already in standard order
     # if [axis_labels[i] if i is not None else None for i in permute] != ['P', 'C', 'T', 'Z', 'Y', 'X']:
     im_raw_dask = da.moveaxis(im_raw_dask, permute, range(len(permute)))
 
+    # Insert dummy axes for any missing dimensions
+    for i, a in enumerate(std_order):
+        if a not in axis_names:
+            im_raw_dask = da.expand_dims(im_raw_dask, axis=i)
+            # axis_names.insert(i, a)
+
     return im_raw_dask
+
+
 def parse_nd2_metadata(nd2_path):
 
     imObject = nd2.ND2File(nd2_path)
