@@ -1,0 +1,13 @@
+name: jax-env
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - jax
+  - jaxlib
+  - numpy<2
+  - numba>=0.60
+  - llvmlite
+  - pip
+  - pip:
+      - pde
