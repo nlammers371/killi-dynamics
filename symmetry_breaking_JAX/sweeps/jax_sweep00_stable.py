@@ -12,7 +12,7 @@ import json
 # --------------------------------------------------
 if __name__ == "__main__":
 
-    sweep_name = "sweep02_jax_phase_space"
+    sweep_name = "sweep00_jax_stable_dense"
     root = Path("/media/nick/hdd021/Cole Trapnell's Lab Dropbox/Nick Lammers/Nick/symmetry_breaking/pde/sweeps/")
     output_dir = ensure_output_dir(root / sweep_name)
 
@@ -30,7 +30,6 @@ if __name__ == "__main__":
         "K_I": 1,             # [concentration units]
         "L_init": "constant",
         "N_sigma": 25.0,
-        "sigma_N_ref": 1.0,   # [conc units/s]
         "rho_mu": 1.0,
     }
 
@@ -40,7 +39,7 @@ if __name__ == "__main__":
     dx = 10            # µm
     L = 1500.0           # µm
     T = 24 * 60 * 60     # 10 h
-    n_save_points = 121  # save every ~0-15 min
+    n_save_points = 25  # save every ~0-15 min
     nx = int(L / dx) + 1
     x = jnp.linspace(0, L, nx)
 
@@ -49,24 +48,25 @@ if __name__ == "__main__":
 
     mu_N = anchors["mu_N"]
     K_A = anchors["K_A"]
-    beta_a = anchors["sigma_N_ref"] / (mu_N * K_A)
+    beta_a_0 = 1 / (mu_N * K_A)
 
     # --------------------------------------------------
     # ND parameter grid (swept in ND space)
     # --------------------------------------------------
     param_grid = {
-        "beta_r_ratio": np.array([10]),
-        "kappa_NL": np.array([10]),
-        "delta": np.array([10]),
-        "a_amp": np.logspace(-3, 2, 200),
-        "r_value": np.logspace(-3, 2, 200),
+        "beta_r": np.logspace(-2, 2, 15) * beta_a_0,
+        "beta_a": np.logspace(-2, 2, 15) * beta_a_0,
+        "kappa_NL": np.logspace(-3, 3, 25),
+        "delta": np.logspace(-2, 2, 11),
+        "a_amp": np.array([1]),
+        "r_value": np.array([0]),
     }
     param_dicts = make_param_dicts(param_grid, grid_type=grid_type, n_samples=n_samples, seed=42)
 
     # Convert ratio → β_r
-    for s in param_dicts:
-        s["beta_r"] = float(s["beta_r_ratio"]) * beta_a
-        del s["beta_r_ratio"]
+    # for s in param_dicts:
+    #     s["beta_r"] = float(s["beta_r_ratio"]) * beta_a
+    #     del s["beta_r_ratio"]
 
     # Convert ND → dimension-full
     dim_params = [nd_to_dim(p, anchors) for p in param_dicts]
