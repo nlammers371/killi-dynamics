@@ -37,8 +37,8 @@ im = zarr.open(zpath, mode="r")
 # zarr2 = zarr.open(zpath2, mode="r")
 
 # generate frame indices
-t_start = 98
-t_stop = 100
+t_start = 560
+t_stop = 562
 nucleus_channel = 1
 frames = np.arange(t_start, t_stop)
 #

@@ -22,7 +22,7 @@ if __name__ == "__main__":
     track_config_list = ["tracking_lcp"]#, "tracking_20250328_redux", "tracking_20250328_redux"]
 
     # set gap closing parameters
-    max_gap = 3
+    max_gap = 5
     max_radius = 50 * np.sqrt(max_gap)
     scale_vec = np.asarray([3.0, 0.85, 0.85])
     n_workers = 12

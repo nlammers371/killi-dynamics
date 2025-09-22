@@ -346,9 +346,16 @@ def main(root: Union[str, Path],
     track_dfs: Dict[str, Optional[pd.DataFrame]] = {}
 
     track_path = root / "tracking" / project_name / tracking_config / f"well{well_num:04}" / tracking_instance
-    tracks_csv = track_path / "tracks_fluo.csv"
+    tracks_csv = track_path / "tracks_fluo_stitched.csv"
+    if not tracks_csv.exists():
+        pass
+        # tracks_csv = track_path / "tracks_stitched.csv"
+    if not tracks_csv.exists():
+        tracks_csv = track_path / "tracks_fluo.csv"
     if not tracks_csv.exists():
         tracks_csv = track_path / "tracks.csv"
+
+
     tracks_df = load_tracks_df(tracks_csv, div_z=div_z, mip_flag=mip_flag)
     if tracks_df is not None:
         track_dfs["nls tracks"] = tracks_df
@@ -739,7 +746,7 @@ def main(root: Union[str, Path],
 
 if __name__ == "__main__":
     root = r"E:\Nick\Cole Trapnell's Lab Dropbox\Nick Lammers\Nick\killi_tracker"
-    project_name = "20250311_LCP1-NLSMSC" #"20250419_BC1-NLSMSC"  #"20250311_LCP1-NLSMSC" # # "20241126_LCP1-NLSMSC"
-    config = "tracking_20250328_redux"
+    project_name = "20241126_LCP1-NLSMSC" #"20250311_LCP1-NLSMSC" #"20250419_BC1-NLSMSC"  #"20250311_LCP1-NLSMSC" # #
+    config = "tracking_lcp"
     mip_flag = True
     main(root=root, project_name=project_name, tracking_config=config, mip_flag=mip_flag)
