@@ -107,8 +107,8 @@ def fit_sphere(points, quantile=0.95):
     # Compute final radius based on chosen mode
     final_distances = np.linalg.norm(points - fitted_center, axis=1)
     fitted_radius = final_distances.mean()
-    outer_radius = np.quantile(final_distances, 1 - quantile)
-    inner_radius = np.quantile(final_distances, quantile)
+    inner_radius = np.quantile(final_distances, 1 - quantile)
+    outer_radius = np.quantile(final_distances, quantile)
 
     return fitted_center, fitted_radius, inner_radius, outer_radius
 
