@@ -2,6 +2,110 @@ import numpy as np
 from scipy.optimize import least_squares
 from scipy.ndimage import gaussian_filter
 from scipy.ndimage import gaussian_filter1d
+import healpy as hp
+
+import numpy as np
+import healpy as hp
+
+def healpix_to_mesh(values, radius, center=(0,0,0)):
+    """
+    Convert a HEALPix map to a triangular mesh suitable for napari.add_surface.
+
+    Parameters
+    ----------
+    values : (Npix,) array
+        Values per HEALPix pixel.
+    radius : float
+        Sphere radius (physical units).
+    center : (3,) array
+        Sphere center (z,y,x).
+
+    Returns
+    -------
+    verts : (N,3) array
+        Vertex coordinates (z,y,x).
+    faces : (M,3) array
+        Mesh faces (triangle indices).
+    vvals : (N,) array
+        Vertex values (duplicated from pixel values).
+    """
+    npix = len(values)
+    nside = int(np.sqrt(npix // 12))
+    if 12 * nside**2 != npix:
+        raise ValueError(f"Array length {npix} is not valid for a HEALPix map.")
+
+    # get pixel boundaries on the unit sphere: shape (3, nverts, npix)
+    boundaries = hp.boundaries(nside, np.arange(npix), step=1, nest=False)
+
+    verts = []
+    faces = []
+    vvals = []
+    vert_index = {}
+    idx = 0
+
+    for pix in range(npix):
+        # slice out one pixel -> shape (3,nverts)
+        corners = boundaries[pix].T        # (nverts,3), in (x,y,z)
+        corners = corners[:, ::-1]               # flip -> (z,y,x)
+        corners = corners * radius + np.array(center)[None, :]
+
+        quad = []
+        for corner in corners:
+            key = tuple(np.round(corner, 8))
+            if key not in vert_index:
+                vert_index[key] = idx
+                verts.append(corner)
+                vvals.append(values[pix])
+                idx += 1
+            quad.append(vert_index[key])
+
+        # triangulate quad
+        faces.append([quad[0], quad[1], quad[2]])
+        faces.append([quad[0], quad[2], quad[3]])
+
+    return np.array(verts, float), np.array(faces, int), np.array(vvals, float)
+
+
+def project_to_healpix(vol, center, radius, scale_vec,
+                       nside=64, mode="mean", dist_thresh=50.0):
+    dz, dy, dx = scale_vec
+    Z, Y, X = np.indices(vol.shape)
+    coords = np.c_[Z.ravel()*dz, Y.ravel()*dy, X.ravel()*dx]
+    vals = vol.ravel().astype(float)
+
+    # restrict to spherical shell
+    dR = np.linalg.norm(coords - center[None, :], axis=1) - radius
+    mask = np.abs(dR) <= dist_thresh
+    coords, vals = coords[mask], vals[mask]
+
+    # spherical angles
+    rel = coords - center[None, :]
+    r = np.linalg.norm(rel, axis=1)
+    theta = np.arccos(np.clip(rel[:, 0] / r, -1, 1))
+    phi = np.arctan2(rel[:, 1], rel[:, 2]) % (2*np.pi)
+
+    # map to healpix pixels
+    npix = hp.nside2npix(nside)
+    pix = hp.ang2pix(nside, theta, phi)
+
+    # counts per pixel
+    counts = np.bincount(pix, minlength=npix)
+
+    if mode == "sum":
+        values = np.bincount(pix, weights=vals, minlength=npix)
+    elif mode == "mean":
+        sums = np.bincount(pix, weights=vals, minlength=npix)
+        values = np.divide(sums, counts, out=np.zeros_like(sums), where=counts > 0)
+    elif mode == "max":
+        # np.bincount can't do max; need groupby-style reduction
+        values = np.full(npix, -np.inf)
+        np.maximum.at(values, pix, vals)
+        values[values == -np.inf] = 0.0
+    else:
+        raise ValueError(f"Unknown mode {mode}")
+
+    return values, counts
+
 
 
 def smooth_spherical_grid(grid, sigma_theta=1.0, sigma_phi=1.0, counts=None):
@@ -59,7 +163,7 @@ def smooth_spherical_grid(grid, sigma_theta=1.0, sigma_phi=1.0, counts=None):
 
 def project_to_sphere(vol, center, radius, scale_vec,
                            n_theta=180, n_phi=360,
-                           mode="mean", dist_thresh=2.0):
+                           mode="mean", dist_thresh=50.0):
     """
     Project intensities onto a spherical mesh suitable for napari.add_surface,
     with pole/seam handling.
@@ -160,7 +264,7 @@ def project_to_sphere(vol, center, radius, scale_vec,
             faces.append([p1, p2, p3])
     faces = np.array(faces, dtype=np.int32)
 
-    return verts, faces, values
+    return verts, faces, values, mask
 
 
 def remove_background_dog(vol, sigma_small_um=2.0, sigma_large_um=8.0, scale_vec=None):
@@ -182,7 +286,7 @@ def remove_background_dog(vol, sigma_small_um=2.0, sigma_large_um=8.0, scale_vec
     dog = np.clip(dog, 0, None)  # keep positive contrast only
     return dog
 
-def fit_sphere(points_phys, R0=None, weights=None, fit_radius=False, loss="huber"):
+def fit_sphere(points_phys, im_shape, R0=None, weights=None, fit_radius=False, loss="huber"):
     """
     Fit a sphere center (and optionally radius) to 3D points.
 
@@ -227,8 +331,12 @@ def fit_sphere(points_phys, R0=None, weights=None, fit_radius=False, loss="huber
             d = np.linalg.norm(pts - c[None, :], axis=1)
             return (d - R0) * np.sqrt(w)
 
-        c0 = np.average(pts, axis=0, weights=w)
-        res = least_squares(residuals, c0, loss=loss)
+        c0 = [im_shape[0]+R0/2, im_shape[1] / 2,  im_shape[2] / 2]
+        c0[0] = im_shape[0]
+        lb = [0, (im_shape[1] // 3), (im_shape[2] // 3)]  # , (im_shape[2]] // 3)]
+        ub = [im_shape[0]+R0, (2 * im_shape[1] // 3), (2 * im_shape[2] // 3)]
+
+        res = least_squares(residuals, c0, loss=loss, bounds=(lb, ub))
         return res.x, R0
 
     else:
@@ -244,5 +352,49 @@ def fit_sphere(points_phys, R0=None, weights=None, fit_radius=False, loss="huber
             d = np.linalg.norm(pts - c[None, :], axis=1)
             return (d - R) * np.sqrt(w)
 
-        res = least_squares(residuals, np.hstack([c0, R0]), loss=loss)
+        lb = [0, (im_shape[1] // 3), (im_shape[2] // 3), 0]#, (im_shape[2]] // 3)]
+        ub = [1000, (2 * im_shape[1] // 3), (2 * im_shape[2] // 3), 1000]
+
+        res = least_squares(residuals, np.hstack([c0, R0]), loss=loss, bounds=(lb, ub))
         return res.x[:3], res.x[3]
+
+
+def make_sphere_mesh(n_phi, n_theta, center, radius):
+    """
+    Create a spherical mesh (vertices, faces) suitable for napari.add_surface.
+
+    Parameters
+    ----------
+    n_phi, n_theta : int
+        Angular resolution of spherical mesh.
+    radius : float
+        Sphere radius.
+
+    Returns
+    -------
+    verts : (N,3) array
+        Vertex coordinates (z,y,x).
+    faces : (M,3) array
+        Mesh faces as indices into verts.
+    """
+    thetas = np.linspace(0, np.pi, n_theta)
+    phis = np.linspace(0, 2*np.pi, n_phi, endpoint=False)
+
+    Theta, Phi = np.meshgrid(thetas, phis, indexing="ij")
+    Xs = radius * np.sin(Theta) * np.cos(Phi) + center[2]
+    Ys = radius * np.sin(Theta) * np.sin(Phi) + center[1]
+    Zs = radius * np.cos(Theta) + center[0]
+    verts = np.stack([Zs.ravel(), Ys.ravel(), Xs.ravel()], axis=1)
+
+    faces = []
+    for i in range(n_theta - 1):
+        for j in range(n_phi):
+            p0 = i * n_phi + j
+            p1 = i * n_phi + (j+1) % n_phi   # wrap around φ
+            p2 = (i+1) * n_phi + j
+            p3 = (i+1) * n_phi + (j+1) % n_phi
+            faces.append([p0, p2, p1])
+            faces.append([p1, p2, p3])
+    faces = np.array(faces, dtype=np.int32)
+
+    return verts, faces

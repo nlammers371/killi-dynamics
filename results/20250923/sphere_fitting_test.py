@@ -10,13 +10,13 @@ import numpy as np
 
 if __name__ == "__main__":
 
-    project_name = "20250716"
+    project_name = "20250621"
 
     zarr_path = Path(f"/media/nick/cluster/projects/data/killi_tracker/built_data/zarr_image_files/{project_name}/")
     image_list = sorted(list(zarr_path.glob("*.zarr")))
     image_list = [im for im in image_list if "_z.zarr" not in str(im)]
-    t_ind = -1
-    well_ind = 7
+    t_ind = 30
+    well_ind = 2
     ch_ind = 1
     R_um = 550
     n_phi = 360
@@ -30,7 +30,7 @@ if __name__ == "__main__":
     thresh = np.percentile(dog, 99) #threshold_multiotsu(dog, classes=3)
     mask = dog > thresh #[1]
     points_phys = np.array(np.nonzero(mask)).T * scale_vec[None, :]
-    fitted_center, fitted_radius = fit_sphere(points_phys, R0=R_um)
+    fitted_center, radius = fit_sphere(points_phys, im_shape=np.multiply(scale_vec, mask.shape), R0=R_um)
 
     verts, faces, values =  project_to_sphere(im_plot, center=fitted_center, radius=R_um, scale_vec=scale_vec,
                                       n_theta=n_theta, n_phi=n_phi,
