@@ -6,12 +6,12 @@ from src.nucleus_dynamics.utilities.image_utils import calculate_LoG
 
 # zarr_path = Path("E:/Nick/Cole Trapnell's Lab Dropbox/Nick Lammers/Nick/killi_tracker/built_data/zarr_image_files/20241126_LCP1-NLSMSC.zarr")
 date = "20250716"
-# zarr_path = Path(f"/media/nick/cluster/projects/data/killi_tracker/built_data/zarr_image_files/{date}/")
-# image_list = sorted(list(zarr_path.glob("*.zarr")))
-zarr_path = "/media/nick/cluster/projects/data/killi_tracker/built_data/cellpose_output/tdTom-bright-log-v5/20250716/20250716_well0000_probs.zarr"
+zarr_path = Path(f"/media/nick/cluster/projects/data/killi_tracker/built_data/zarr_image_files/{date}/")
+image_list = sorted(list(zarr_path.glob("*.zarr")))
+# zarr_path = "/media/nick/cluster/projects/data/killi_tracker/built_data/cellpose_output/tdTom-bright-log-v5/20250716/20250716_well0000_probs.zarr"
 image_ind = 0
 
-im_zarr = zarr.open(zarr_path, mode='r')
+im_zarr = zarr.open(image_list[image_ind], mode='r')
 
 
 time_range = [0, 5]

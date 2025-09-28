@@ -10,4 +10,5 @@ if __name__ == '__main__':
     cellpose_segmentation(root=root,
                           experiment_date=project_name,
                           pretrained_model=model_path,
+                          preproc_sigma=[1, 3, 3],
                           nuclear_channel=1)
