@@ -19,53 +19,66 @@ SWAP_MAP = {
     0: (0, 1, 0),   # channel-0 → green
     1: (1, 0, 1),   # channel-1 → magenta
 }
+
+def _to_rgb(
+    frame_ctyx: np.ndarray,
+    *,
+    channel_map: Mapping[int, Sequence[float]] = SWAP_MAP,
+    clip: tuple[float, float] | None = None,
+) -> np.ndarray:
+    """
+    Convert (C,Y,X) → (Y,X,3) using an arbitrary channel→RGB mapping.
+
+    channel_map : dict {channel_index: (R,G,B) coefficients}
+        Example for swapping: {0: (0,1,0), 1: (1,0,1)}
+    """
+    if clip is None:
+        lo, hi = np.percentile(frame_ctyx[list(channel_map)], (2, 99.8))
+    else:
+        lo, hi = clip
+
+    # normalise selected channels only
+    frame_norm = np.clip((frame_ctyx - lo) / (hi - lo), 0, 1)
+
+    # build RGB
+    rgb = np.zeros((*frame_ctyx.shape[1:], 3), dtype=np.float32)
+    for ch, (r_coef, g_coef, b_coef) in channel_map.items():
+        rgb[..., 0] += r_coef * frame_norm[ch]
+        rgb[..., 1] += g_coef * frame_norm[ch]
+        rgb[..., 2] += b_coef * frame_norm[ch]
+
+    return (np.clip(rgb, 0, 1) * 255).astype(np.uint8)
+
 # ---------- colour-mapping helpers ------------------------------------------------
 def _to_rgb(frame_ctyx: np.ndarray,
-            channel_map: Optional[Mapping[int, Sequence[float]]] = None,
+            channel_map: Mapping[int, Sequence[float]] = SWAP_MAP,
             clip: Optional[tuple[float, float]] = None) -> np.ndarray:
     """
-    Convert (C,Y,X) → (Y,X,3).
+    Convert (C,Y,X) → (Y,X,3) using:
+      ch-0  → magenta  (R+B)
+      ch-1  → green    (G)
+    Additional channels are ignored.
 
-    If 1 channel → grayscale.
-    If 2+ channels → use channel_map (default = magenta+green).
+    clip : (lo, hi)  → intensity range for min-max scaling
     """
-    assert frame_ctyx.ndim == 3, "need (C,Y,X) array"
-
-    c = frame_ctyx.shape[0]
-
-    if c == 1:
-        # grayscale mode
-        if clip is None:
-            lo, hi = np.percentile(frame_ctyx[0], (2, 99.8))
-        else:
-            lo, hi = clip
-        ch_norm = np.clip((frame_ctyx[0] - lo) / (hi - lo), 0, 1)
-        rgb = np.stack([ch_norm, ch_norm, ch_norm], axis=-1)
-
+    assert frame_ctyx.ndim == 3 and frame_ctyx.shape[0] >= 2, "need ≥2 channels"
+    if clip is None:
+        lo0, hi0 = np.percentile(frame_ctyx[0], (2, 99.8))
+        lo1, hi1 = np.percentile(frame_ctyx[1], (2, 99.8))
+        scale = [(lo0, hi0), (lo1, hi1)]
     else:
-        # default magenta+green map if none supplied
-        if channel_map is None:
-            channel_map = {0: (1, 0, 1),   # ch-0 → magenta
-                           1: (0, 1, 0)}   # ch-1 → green
-        # get percentile scaling per channel
-        if clip is None:
-            scale = {ch: np.percentile(frame_ctyx[ch], (2, 99.8))
-                     for ch in channel_map}
-        else:
-            # pass in either (lo,hi) for all or dict of per-channel
-            scale = {ch: clip if isinstance(clip[0], (int,float)) else clip[ch]
-                     for ch in channel_map}
+        scale = clip  # list of pairs or single pair
 
-        rgb = np.zeros((*frame_ctyx.shape[1:], 3), dtype=np.float32)
-        for ch, (r, g, b) in channel_map.items():
-            lo, hi = scale[ch]
+    rgb = np.zeros((*frame_ctyx.shape[1:], 3), dtype=np.float32)
+    for ch, (r, g, b) in channel_map.items():
+        if ch == 1:
+            lo, hi = scale[ch] if isinstance(scale[0], tuple) else scale
             ch_norm = np.clip((frame_ctyx[ch] - lo) / (hi - lo), 0, 1)
             rgb[..., 0] += r * ch_norm
             rgb[..., 1] += g * ch_norm
             rgb[..., 2] += b * ch_norm
 
     return (rgb * 255).astype(np.uint8)
-
 
 # ---------- main export routine ---------------------------------------------------
 def export_timelapse(
@@ -113,8 +126,8 @@ def export_timelapse(
         # ---- open lazily via dask -------------------------------------------------
         data = da.from_zarr(z_path)     # shape (C,T,Y,X)
         c, t, y, x = data.shape
-        if c < 1:
-            print(f"[warn] well {w} has no channels, skipping")
+        if c < 2:
+            print(f"[warn] well {w} has <2 channels, skipping")
             continue
 
         # ---- writer factory -------------------------------------------------------
@@ -151,11 +164,11 @@ def export_timelapse(
 if __name__ == "__main__":
     # example usage
     export_timelapse(
-        zarr_root=r"/media/nick/cluster/projects/data/killi_tracker/built_data/zarr_image_files/20250621/",
-        experiment_date="20250621",
-        wells=range(32),          # first four wells
+        zarr_root=r"Y:\projects\data\killi_tracker\built_data\zarr_image_files\20250731",
+        experiment_date="20250716",
+        wells=range(14),          # first four wells
         save_as="mp4",           # or 'png' / 'tiff'
         fps=3,
         overwrite=False,
-        out_dir="/media/nick/cluster/projects/data/killi_tracker/built_data/mips/20250621"  # optional, defaults to zarr_root / 'movies'
+        out_dir="E:\\Nick\\movies"  # optional, defaults to zarr_root / 'movies'
     )

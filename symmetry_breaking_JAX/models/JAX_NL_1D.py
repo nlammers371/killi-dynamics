@@ -308,12 +308,12 @@ def run_1d(params: Params1D,
 
     rhs = build_rhs_1d(x, params, blips)
     y0 = y0_override if y0_override is not None else build_initial_state_1d(
-        x, N_mode="gaussian", N_amp=10.0, N_sigma=10.0, L_mode="constant", L_value=0.0, rho_value=0.1
+        x, N_mode="gaussian", N_amp=10.0, N_sigma=10.0, L_mode="constant", L_amp=0.0, rho_value=0.1
     )
 
     term = dfx.ODETerm(rhs)
     solver = dfx.Dopri5()
-    controller = dfx.PIDController(rtol=1e-5, atol=1e-8)# stiff, adaptive
+    controller = dfx.PIDController(rtol=1e-4, atol=1e-6)# stiff, adaptive
     sol = dfx.diffeqsolve(
         term, solver,
         t0=0.0, t1=T, dt0=1e-3,
