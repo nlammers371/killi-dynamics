@@ -1,5 +1,13 @@
-from src.nucleus_dynamics.build.build01_segment_nuclei_zarr import cellpose_segmentation
+import sys
+from pathlib import Path
 
+# Path to the project *root* (the directory that contains the `src/` folder)
+REPO_ROOT = Path(__file__).resolve().parents[2]   # adjust “2” if levels differ
+
+# Put that directory at the *front* of sys.path so Python looks there first
+sys.path.insert(0, str(REPO_ROOT))
+
+from src.nucleus_dynamics.build.build01_segment_nuclei_zarr import cellpose_segmentation
 
 if __name__ == '__main__':
 
@@ -8,7 +16,7 @@ if __name__ == '__main__':
     # model_path = "/media/nick/cluster/projects/data/pecfin_dynamics/built_data/cellpose_training/standard_models/tdTom-bright-log-v5"
     root = "/net/trapnell/vol1/home/nlammers/projects/data/killi_tracker/"
     model_path = "/net/trapnell/vol1/home/nlammers/projects/data/pecfin_dynamics/built_data/cellpose_training/standard_models/tdTom-bright-log-v5"
-    
+
     project_name = "20250716"
     cellpose_segmentation(root=root,
                           experiment_date=project_name,

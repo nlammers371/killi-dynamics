@@ -13,7 +13,7 @@ zarr_path = "/media/nick/cluster/projects/data/killi_tracker/built_data/cellpose
 # im_zarr = zarr.open(image_list[image_ind], mode='r')
 im_zarr = zarr.open(zarr_path, mode='r')
 scale_vec = tuple(im_zarr.attrs['voxel_size_um'])  # (z, y, x) spacing in microns
-im_plot = np.squeeze(im_zarr[12])   # Assuming channel 0 is the nuclear channel
+im_plot = np.squeeze(im_zarr[32])   # Assuming channel 0 is the nuclear channel
 
 # im_log, im_bkg = calculate_LoG(im_plot, scale_vec=scale_vec, sigma_dims=[1, 3, 3], subtract_bkg=False, log_sigma=1)
 # im_LoG, thresh = calculate_li_thresh(im_plot, thresh_li=1, use_subsample=False)

@@ -109,6 +109,7 @@ def restitch_masks(mask_stack_zarr_path, prob_zarr_path, thresh_range, min_mask_
         ams[str(int(t))] = list(thresh_range)
         mask_aff_zarr.attrs["prob_levels"] = ams
 
+
 def do_affinity_stitching(prob_array, grad_array, scale_vec, seg_res=None, prob_thresh_range=None,
                                                     niter=100, min_mask_size=5, max_mask_size=1e5):
 
@@ -265,15 +266,6 @@ def stitch_cellpose_labels(root, model_name, experiment_date, well_range=None, p
     if not os.path.isdir(out_directory):
         os.makedirs(out_directory)
 
-    # load curation data if we have it
-    # curation_path = os.path.join(root, "metadata", "curation", experiment_date + "_curation_info.csv")
-    # has_curation_info = os.path.isfile(curation_path)
-    # if has_curation_info:
-    #     curation_df = pd.read_csv(curation_path)
-    #     curation_df_long = pd.melt(curation_df,
-    #                                id_vars=["series_number", "notes", "tbx5a_flag", "follow_up_flag"],
-    #                                var_name="time_index", value_name="qc_flag")
-    #     curation_df_long["time_index"] = curation_df_long["time_index"].astype(int)
 
     # get list of wells with labels to stitch
     well_list = sorted(glob.glob(cellpose_directory + "*_probs.zarr"))
@@ -289,7 +281,7 @@ def stitch_cellpose_labels(root, model_name, experiment_date, well_range=None, p
         # well_num = int(well[well_index + 5:well_index + 9])
 
         #########
-        file_prefix = path_leaf(well).replace("_probs.zarr", "")
+        file_prefix = os.path.basename(well).replace("_probs.zarr", "")
         print("Stitching data from " + file_prefix)
         raw_name = os.path.join(raw_directory, file_prefix + ".zarr")
         prob_name = os.path.join(cellpose_directory, file_prefix + "_probs.zarr")
