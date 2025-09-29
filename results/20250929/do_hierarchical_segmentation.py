@@ -12,7 +12,8 @@ import numpy as np
 
 # set read/write paths
 # root = "/media/nick/hdd02/Cole Trapnell's Lab Dropbox/Nick Lammers/Nick/pecfin_dynamics/"
-root = "/media/nick/cluster/projects/data/killi_tracker/"
+# root = "/media/nick/cluster/projects/data/killi_tracker/"
+root = "/net/trapnell/vol1/home/nlammers/projects/data/killi_tracker/"
 experiment_date_vec = ["20250716"]
 pretrained_model_vec = ["tdTom-bright-log-v5"]  #[pretrained_model0, pretrained_model1, pretrained_model1, pretrained_model0, pretrained_model0]
 overwrite = True
