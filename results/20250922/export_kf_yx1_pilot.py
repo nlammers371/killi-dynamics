@@ -22,7 +22,7 @@ def main():
         nuclear_channel = nuclear_channel_vec[e]
         channel_names = channel_names_vec[e]
         export_nd2_to_zarr(root, experiment_date, overwrite_flag, nuclear_channel=nuclear_channel,
-                           channel_names=channel_names, save_z_projections=True, num_workers=1, metadata_only=True)
+                           channel_names=channel_names, save_z_projections=True, num_workers=12, metadata_only=True)
 
 if __name__ == '__main__':
     multiprocessing.freeze_support()
