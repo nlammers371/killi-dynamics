@@ -20,4 +20,5 @@ if __name__ == '__main__':
                           experiment_date=project_name,
                           pretrained_model=model_path,
                           preproc_sigma=[1, 3, 3],
+                          well_list=[6,7,8,9,10,11,12,15], #[1,2,3,4,5,6,7,8,9,10,11,12,15],
                           nuclear_channel=1)

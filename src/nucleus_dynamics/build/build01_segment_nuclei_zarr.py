@@ -1,6 +1,7 @@
 """
 Image segmentation via Cellpose library
 """
+import re
 import logging
 import glob2 as glob
 import os
@@ -17,6 +18,7 @@ import pandas as pd
 from skimage.transform import resize
 import zarr
 from src.nucleus_dynamics.utilities.image_utils import calculate_LoG
+from pathlib import Path
 
 # logging = logging.getlogging(__name__)
 logging.basicConfig(level=logging.NOTSET)
@@ -177,10 +179,13 @@ def cellpose_segmentation(
     # get list of images
     image_list = sorted(glob.glob(data_directory + "*.zarr"))
     if well_list is None:
-        well_list = range(0, len(image_list))
+        well_list = [
+            int(re.search(r"well(\d+)\.zarr$", Path(p).name).group(1))
+            for p in image_list
+        ]
     for well_index in well_list:
 
-        zarr_path = image_list[well_index]
+        zarr_path = Path(data_directory) / (experiment_date + f"_well{well_index:04}.zarr")
         im_name = os.path.basename(zarr_path)
         print("processing " + im_name)
         # read the image data

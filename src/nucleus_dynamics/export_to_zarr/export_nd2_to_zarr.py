@@ -18,21 +18,21 @@ def write_to_zarr(well_num, out_dir, experiment_date, im_array_dask, metadata, d
     # initialize zarr data store
     filename = experiment_date + f"_well{well_num:04}.zarr"
     zarr_file = os.path.join(out_dir, filename)
-
+    mip_file = os.path.join(out_dir, "mips", filename.replace(".zarr", "_z.zarr"))
     # check for existing zarr file
     prev_flag = os.path.isdir(zarr_file)
     # Initialize zarr array
     if not multichannel_flag:
         well_zarr = zarr.open(zarr_file, mode='w', shape=well_shape, dtype=dtype, chunks=(1,) + nd2_shape[2:])
         if save_z_projections:
-            well_zarr_z = zarr.open(zarr_file.replace(".zarr", "_z.zarr"), mode='w',
+            well_zarr_z = zarr.open(mip_file, mode='w',
                                     shape=well_shape[:-3] + well_shape[-2:],
                                     dtype=dtype, chunks=tuple([1]) + tuple(well_shape[-2:]))
     else:
         well_zarr = zarr.open(zarr_file, mode='w', shape=well_shape, dtype=dtype, chunks=tuple([1, 1]) +
                                                                                          tuple(well_shape[-3:]))
         if save_z_projections:
-            well_zarr_z = zarr.open(zarr_file.replace(".zarr", "_z.zarr"), mode='w',
+            well_zarr_z = zarr.open(mip_file, mode='w',
                                     shape=well_shape[:-3] + well_shape[-2:],
                                     dtype=dtype, chunks=tuple([1, 1]) + tuple(well_shape[-2:]))
 
