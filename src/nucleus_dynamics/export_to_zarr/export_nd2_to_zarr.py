@@ -1,13 +1,9 @@
 import zarr
 import numpy as np
-import napari
-from skimage.transform import resize
 import glob2 as glob
 import os
 import nd2
-import dask.array as da
 from tqdm import tqdm
-from src.utilities.register_image_stacks import register_timelapse
 from src.utilities.extract_frame_metadata import extract_frame_metadata, permute_nd2_axes
 from tqdm.contrib.concurrent import process_map
 from functools import partial
