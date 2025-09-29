@@ -222,7 +222,7 @@ def extract_frame_metadata(
     metadata["zyx_shape"] = tuple([n_z, n_y, n_x])
     metadata["voxel_size_um"] = tuple(np.asarray(imObject.voxel_size())[::-1])
 
-    im_name = os.path.basename(nd2_path)
+    # im_name = os.path.basename(nd2_path)
     # print("processing " + im_name)
 
     ####################
@@ -237,6 +237,10 @@ def extract_frame_metadata(
     plate_cols = plate_df.columns
     well_cols = well_df.columns
     well_df = well_df.merge(plate_df, on="nd2_series", how="left")
+
+    # get time res
+    temp_df = well_df.loc[well_df["well_index"] == well_df.loc[0, "well_index"]].reset_index(drop=True)
+    metadata["dt"] = temp_df.loc[1, "time"] - temp_df.loc[0, "time"]
 
     # reorder columns
     col_union = plate_cols.tolist() + well_cols.tolist()
