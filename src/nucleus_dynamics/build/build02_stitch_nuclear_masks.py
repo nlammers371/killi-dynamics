@@ -12,7 +12,7 @@ from skimage.morphology import label
 import pandas as pd
 import glob2 as glob
 
-def restitch_masks(mask_stack_zarr_path, prob_zarr_path, thresh_range, min_mask_size=15):
+def restitch_masks(mask_stack_zarr_path, prob_zarr_path, thresh_range, min_mask_size=10):
 
     # open the zarr file
     mask_stack_zarr = zarr.open(mask_stack_zarr_path, mode="a")
@@ -111,7 +111,7 @@ def restitch_masks(mask_stack_zarr_path, prob_zarr_path, thresh_range, min_mask_
 
 
 def do_affinity_stitching(prob_array, grad_array, scale_vec, seg_res=None, prob_thresh_range=None,
-                                                    niter=100, min_mask_size=5, max_mask_size=1e5):
+                                                    niter=100, min_mask_size=7, max_mask_size=5e3):
 
     if prob_thresh_range is None:
         raise Exception("No threshold range was provided")
@@ -249,13 +249,13 @@ def do_affinity_stitching(prob_array, grad_array, scale_vec, seg_res=None, prob_
 
 
 def stitch_cellpose_labels(root, model_name, experiment_date, well_range=None, prob_thresh_range=None, overwrite=False,
-                           seg_res=None):
+                           seg_res=None, write_mode='a'):
 
     if prob_thresh_range is None:
         prob_thresh_range = np.arange(-8, 9, 4)
 
     if seg_res is None:
-        seg_res = 0.65
+        seg_res = 1
 
     # get raw data dir
     raw_directory = os.path.join(root, "built_data", "zarr_image_files", experiment_date, '')
@@ -302,11 +302,11 @@ def stitch_cellpose_labels(root, model_name, experiment_date, well_range=None, p
         prev_flag = os.path.isdir(multi_mask_zarr_path)
         
         # initialize zarr file to save mask hierarchy
-        multi_mask_zarr = zarr.open(multi_mask_zarr_path, mode='a', shape=(prob_zarr.shape[0],) + (len(prob_thresh_range),) + tuple(prob_zarr.shape[1:]),
+        multi_mask_zarr = zarr.open(multi_mask_zarr_path, mode=write_mode, shape=(prob_zarr.shape[0],) + (len(prob_thresh_range),) + tuple(prob_zarr.shape[1:]),
                                 dtype=np.uint16, chunks=(1, 1,) + prob_zarr.shape[1:])
         
         # initialize zarr to save current best mask
-        aff_mask_zarr = zarr.open(aff_mask_zarr_path, mode='a', shape=prob_zarr.shape,
+        aff_mask_zarr = zarr.open(aff_mask_zarr_path, mode=write_mode, shape=prob_zarr.shape,
                                     dtype=np.uint16, chunks=(1,) + prob_zarr.shape[1:])
 
         # transfer metadata from raw data to cellpose products

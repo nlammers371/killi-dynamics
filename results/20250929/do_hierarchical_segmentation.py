@@ -7,9 +7,9 @@ root = "/media/nick/cluster/projects/data/killi_tracker/"
 experiment_date_vec = ["20250716"]
 pretrained_model_vec = ["tdTom-bright-log-v5"]  #[pretrained_model0, pretrained_model1, pretrained_model1, pretrained_model0, pretrained_model0]
 overwrite = True
-prob_thresh_range = np.arange(1, 10, 3)
-well_range = np.arange(0, 1)
-seg_res = 0.65
+prob_thresh_range = np.arange(0.5, 6, 3)
+well_range = np.arange(0, 12)
+seg_res = 1.3  # segmentation resolution in microns
 
 for e, experiment_date in enumerate(experiment_date_vec):
 
