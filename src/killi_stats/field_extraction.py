@@ -48,7 +48,7 @@ def fit_spheres_for_well(
         return sphere_df
 
     sphere_records = []
-    for t in [31, 32]:#range(n_t):
+    for t in range(n_t):
         im = np.squeeze(im_zarr[sphere_fit_channel, t])
         dog = remove_background_dog(vol=im,
                                     scale_vec=scale_vec,
@@ -126,8 +126,11 @@ def project_well_to_healpix(
         dtype="float32",
         compressor=zarr.Blosc(cname="zstd", clevel=3, shuffle=2),
     )
+    raw_arr.attrs["mode"] = proj_mode
+    raw_arr.attrs["nside"] = nside
+    raw_arr.attrs["dist_thresh"] = dist_thresh
 
-    for t in [31, 32]: #range(n_t):
+    for t in range(n_t):
         row = sphere_df.loc[sphere_df.t == t].iloc[0]
         # use smoothed values if available
         if "center_z_smooth" in row:
@@ -209,7 +212,7 @@ def project_fields_to_sphere(
                              overwrite=overwrite_sphere_centers)
 
     if n_jobs == 1:
-        _ = [run_sphere_fit(a) for a in tqdm(wells, desc="Processing wells")]
+        _ = [run_sphere_fit(a) for a in tqdm(wells, desc="Fitting spheres")]
     else:
         _ = process_map(
                                 run_sphere_fit,
