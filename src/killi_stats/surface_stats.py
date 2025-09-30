@@ -7,6 +7,25 @@ import healpy as hp
 import numpy as np
 import healpy as hp
 
+
+def laea_forward(theta, phi):
+    """Lambert azimuthal equal-area, centered at north pole.
+    theta, phi in radians; returns x, y in [-1,1] disk."""
+    r = np.sqrt(2.0) * np.sin(theta / 2.0)
+    return r * np.cos(phi), r * np.sin(phi)
+
+def laea_inverse(x, y):
+    """Inverse LAEA back to (theta, phi)."""
+    r = np.hypot(x, y)
+    r = np.clip(r, 0.0, 1.0)  # stay within hemisphere
+    theta = 2.0 * np.arcsin(r / np.sqrt(2.0))
+    phi = np.arctan2(y, x)
+    return theta, phi
+
+def recenter_longitude(phi, phi0):
+    """Rotate longitudes by phi0 (radians)."""
+    return (phi - phi0 + np.pi) % (2*np.pi) - np.pi
+
 def healpix_to_mesh(values, radius, center=(0,0,0)):
     """
     Convert a HEALPix map to a triangular mesh suitable for napari.add_surface.
