@@ -6,7 +6,7 @@ from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
-
+from typing import Union
 from src.killi_stats.surface_stats import (
     fit_sphere,
     remove_background_dog,
@@ -158,11 +158,11 @@ def project_well_to_healpix(
 
 
 def project_fields_to_sphere(
-    root: Path | str,
+    root: Union[Path, str],
     project_name: str,
-    wells: list[int] | None = None,
-    channels: list[int] | None = None,
-    R_um: float | None = None,
+    wells: Union[list[int] | None] = None,
+    channels: Union[list[int], None] = None,
+    R_um: Union[float, None] = None,
     nside: int = 64,
     sigma_small_um: float = 2.0,
     sigma_large_um: float = 8.0,
