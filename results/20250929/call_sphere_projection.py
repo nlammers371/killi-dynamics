@@ -24,7 +24,7 @@ if __name__ == '__main__':
                           proj,
                           wells=well_list[p],
                           R_um=R_um,
-                          dist_thresh=50,
-                          n_jobs=1,
+                          dist_thresh=75,
+                          n_jobs=6,
                           sphere_fit_channel=sphere_fit_channels[p],
                           proj_mode="max")
