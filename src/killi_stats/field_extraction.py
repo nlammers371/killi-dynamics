@@ -160,7 +160,7 @@ def project_well_to_healpix(
 def project_fields_to_sphere(
     root: Union[Path, str],
     project_name: str,
-    wells: Union[list[int] | None] = None,
+    wells: Union[list[int], None] = None,
     channels: Union[list[int], None] = None,
     R_um: Union[float, None] = None,
     nside: int = 64,
