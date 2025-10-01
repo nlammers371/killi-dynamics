@@ -219,7 +219,7 @@ def project_fields_to_sphere(
                        wells,
                                 max_workers=n_jobs,
                                 chunksize=1,
-                                desc="Processing wells",
+                                desc="Fitting spheres",
                             )
 
     ##############################
