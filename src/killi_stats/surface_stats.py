@@ -305,7 +305,7 @@ def remove_background_dog(vol, sigma_small_um=2.0, sigma_large_um=8.0, scale_vec
     dog = np.clip(dog, 0, None)  # keep positive contrast only
     return dog
 
-def fit_sphere(points_phys, im_shape, R0=None, weights=None, fit_radius=False, loss="huber"):
+def fit_sphere(points_phys, im_shape, R0=None, weights=None, fit_radius=False, loss="huber", max_nfev=1000):
     """
     Fit a sphere center (and optionally radius) to 3D points.
 
@@ -355,7 +355,8 @@ def fit_sphere(points_phys, im_shape, R0=None, weights=None, fit_radius=False, l
         lb = [0, (im_shape[1] // 3), (im_shape[2] // 3)]  # , (im_shape[2]] // 3)]
         ub = [im_shape[0]+R0, (2 * im_shape[1] // 3), (2 * im_shape[2] // 3)]
 
-        res = least_squares(residuals, c0, loss=loss, bounds=(lb, ub))
+        res = least_squares(residuals, c0, loss=loss, bounds=(lb, ub), max_nfev=max_nfev)
+
         return res.x, R0
 
     else:
