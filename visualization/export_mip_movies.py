@@ -164,7 +164,7 @@ def export_timelapse(
 if __name__ == "__main__":
     # example usage
     export_timelapse(
-        zarr_root=r"Y:\projects\data\killi_tracker\built_data\zarr_image_files\20250716",
+        zarr_root=r"Y:\projects\data\killi_tracker\built_data\zarr_image_files\20250731",
         experiment_date="20250716",
         wells=range(14),          # first four wells
         save_as="mp4",           # or 'png' / 'tiff'
