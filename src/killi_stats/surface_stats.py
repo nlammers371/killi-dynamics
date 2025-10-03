@@ -305,7 +305,7 @@ def remove_background_dog(vol, sigma_small_um=2.0, sigma_large_um=8.0, scale_vec
     dog = np.clip(dog, 0, None)  # keep positive contrast only
     return dog
 
-def fit_sphere(points_phys, im_shape, R0=None, weights=None, fit_radius=False, loss="huber", max_nfev=1000):
+def fit_sphere(points_phys, im_shape, R0=None, weights=None, loss="huber", max_nfev=1000):
     """
     Fit a sphere center (and optionally radius) to 3D points.
 
@@ -336,6 +336,8 @@ def fit_sphere(points_phys, im_shape, R0=None, weights=None, fit_radius=False, l
         raise ValueError("points_phys must be (N,3)")
     N = len(pts)
 
+    fit_radius = R0 is None
+
     if weights is None:
         w = np.ones(N)
     else:
@@ -360,12 +362,14 @@ def fit_sphere(points_phys, im_shape, R0=None, weights=None, fit_radius=False, l
         return res.x, R0
 
     else:
+        c0 = np.asarray([im_shape[0] + 600 / 2, im_shape[1] / 2, im_shape[2] / 2])
+        c0[0] = im_shape[0]
         if R0 is None:
             # crude guess: mean distance to centroid
-            c0 = np.mean(pts, axis=0)
+            # c0 = np.mean(pts, axis=0)
             R0 = np.mean(np.linalg.norm(pts - c0[None, :], axis=1))
-        else:
-            c0 = np.mean(pts, axis=0)
+        # else:
+            # c0 = np.mean(pts, axis=0)
 
         def residuals(p):
             c, R = p[:3], p[3]
