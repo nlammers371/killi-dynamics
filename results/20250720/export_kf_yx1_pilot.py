@@ -1,7 +1,5 @@
-import os
-import sys
 import multiprocessing
-from src.nucleus_dynamics.export_to_zarr.export_nd2_to_zarr import export_nd2_to_zarr
+from src.build_yx1.export_nd2_to_zarr import export_nd2_to_zarr
 
 
 def main():

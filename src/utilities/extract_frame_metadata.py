@@ -206,7 +206,7 @@ def extract_frame_metadata(
 
     nd2_path = image_list[0]
     imObject = nd2.ND2File(nd2_path)
-    im_raw_dask =permute_nd2_axes(imObject)
+    im_raw_dask = permute_nd2_axes(imObject)
 
 
     nd2_shape = im_raw_dask.shape
