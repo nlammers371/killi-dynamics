@@ -69,8 +69,8 @@ def fit_sphere_with_percentile(points_phys, im_shape, R0=None, weights=None,
     # initial vector
     p0 = np.hstack([c0, R0])
     # bounds
-    lb = [0, im_shape[1]//3, im_shape[2]//3, 0]
-    ub = [2*im_shape[0], 2*im_shape[1]//3, 2*im_shape[2]//3, 2*R0]
+    lb = [0, im_shape[1]//3, im_shape[2]//3, 400]
+    ub = [2000, 2*im_shape[1]//3, 2*im_shape[2]//3, 700]
 
     res = least_squares(residuals, p0, loss=loss, f_scale=f_scale,
                         bounds=(lb, ub), max_nfev=max_nfev)

@@ -20,4 +20,4 @@ if __name__ == '__main__':
         sphere_fit_wrapper(root,
                           proj,
                           model_name=model_name,
-                          n_jobs=1)
+                          n_jobs=4)
