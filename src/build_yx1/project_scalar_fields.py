@@ -6,14 +6,51 @@ from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map
 from functools import partial
 from typing import Union
-from src.killi_stats.surface_stats import (
-    project_to_sphere,
-    smooth_spherical_grid, project_to_healpix,
-)
+import re
+import healpy as hp
 
 
-def _sphere_projection(args):
-    return project_to_sphere(*args)
+
+def project_to_healpix(vol, center, radius, scale_vec,
+                       nside=64, mode="mean", dist_thresh=50.0):
+    
+    dz, dy, dx = scale_vec
+    Z, Y, X = np.indices(vol.shape)
+    coords = np.c_[Z.ravel()*dz, Y.ravel()*dy, X.ravel()*dx]
+    vals = vol.ravel().astype(float)
+
+    # restrict to spherical shell
+    dR = np.linalg.norm(coords - center[None, :], axis=1) - radius
+    mask = np.abs(dR) <= dist_thresh
+    coords, vals = coords[mask], vals[mask]
+
+    # spherical angles
+    rel = coords - center[None, :]
+    r = np.linalg.norm(rel, axis=1)
+    theta = np.arccos(np.clip(rel[:, 0] / r, -1, 1))
+    phi = np.arctan2(rel[:, 1], rel[:, 2]) % (2*np.pi)
+
+    # map to healpix pixels
+    npix = hp.nside2npix(nside)
+    pix = hp.ang2pix(nside, theta, phi)
+
+    # counts per pixel
+    counts = np.bincount(pix, minlength=npix)
+
+    if mode == "sum":
+        values = np.bincount(pix, weights=vals, minlength=npix)
+    elif mode == "mean":
+        sums = np.bincount(pix, weights=vals, minlength=npix)
+        values = np.divide(sums, counts, out=np.zeros_like(sums), where=counts > 0)
+    elif mode == "max":
+        # np.bincount can't do max; need groupby-style reduction
+        values = np.full(npix, -np.inf)
+        np.maximum.at(values, pix, vals)
+        values[values == -np.inf] = 0.0
+    else:
+        raise ValueError(f"Unknown mode {mode}")
+
+    return values, counts
 
 
 def project_well_to_healpix(
@@ -28,7 +65,7 @@ def project_well_to_healpix(
     """
     Project a well's volumes into Healpix sphere using precomputed sphere fits.
     """
-    image_path = image_list[w]
+    image_path = [m for m in image_list if int(re.search(r"well(\d+)", str(m)).group(1))==w][0]
     im_zarr = zarr.open(image_path, mode="r")
     n_ch, n_t, *_ = im_zarr.shape
     scale_vec = np.array(im_zarr.attrs["voxel_size_um"])
@@ -41,20 +78,24 @@ def project_well_to_healpix(
 
     # Output zarr for projected fields
     field_path = out_root / f"well{w:04}_fields.zarr"
-    # if field_path.exists() and not overwrite:
-    #     return zarr.open(field_path, mode="r")
+    
+    field_store = zarr.open(field_path, mode="a")
 
-    field_store = zarr.open(field_path, mode="w")
-    raw_arr = field_store.create_dataset(
-        "raw",
-        shape=(n_t, len(channels), 12*nside**2),
-        chunks=(1, 1, 12*nside**2),
+    # Delete existing subgroup if present
+    if proj_mode in field_store:
+        del field_store[proj_mode]
+
+    field_arr = field_store.create_dataset(
+        proj_mode,
+        shape=(n_t, len(channels), 12 * nside ** 2),
+        chunks=(1, 1, 12 * nside ** 2),
         dtype="float32",
         compressor=zarr.Blosc(cname="zstd", clevel=3, shuffle=2),
     )
-    raw_arr.attrs["mode"] = proj_mode
-    raw_arr.attrs["nside"] = nside
-    raw_arr.attrs["dist_thresh"] = dist_thresh
+    
+    field_arr.attrs["mode"] = proj_mode
+    field_arr.attrs["nside"] = nside
+    field_arr.attrs["dist_thresh"] = dist_thresh
 
     for t in range(n_t):
         row = sphere_df.loc[sphere_df.t == t].iloc[0]
@@ -77,30 +118,22 @@ def project_well_to_healpix(
                 mode=proj_mode,
                 dist_thresh=dist_thresh,
             )
-            raw_arr[t, i] = values
+            field_arr[t, i] = values
 
-    return field_store
+    return field_arr
 
 
 
-def project_fields_to_sphere(
+def field_projection_wrapper(
     root: Union[Path, str],
     project_name: str,
     wells: Union[list[int], None] = None,
     channels: Union[list[int], None] = None,
-    R_um: Union[float, None] = None,
     nside: int = 64,
-    sigma_small_um: float = 2.0,
-    sigma_large_um: float = 8.0,
     proj_mode: str = "mean",
     dist_thresh: float = 50.0,
-    smooth_centers: bool = True,
-    center_smooth_window: int = 3,
-    outlier_thresh: float = 2.0,
-    dog_thresh: float = 99.0,
     n_jobs: int = 1,
-    sphere_fit_channel: int = 0,
-    overwrite_sphere_centers: bool = False,
+    overwrite_fields: bool = False,
 ):
     """
     Parallel wrapper across wells.
@@ -119,34 +152,8 @@ def project_fields_to_sphere(
     out_root.mkdir(parents=True, exist_ok=True)
 
     if wells is None:
-        wells = list(range(len(image_list)))
-
-    ##############################
-    # Fit spheres
-
-    run_sphere_fit = partial(fit_spheres_for_well,
-                             image_list=image_list,
-                             R_um=R_um,
-                             sphere_fit_channel=sphere_fit_channel,
-                             out_root=out_root,
-                             sigma_small_um=sigma_small_um,
-                             sigma_large_um=sigma_large_um,
-                             smooth_centers=smooth_centers,
-                             center_smooth_window=center_smooth_window,
-                             outlier_thresh=outlier_thresh,
-                             dog_thresh=dog_thresh,
-                             overwrite=overwrite_sphere_centers)
-
-    if n_jobs == 1:
-        _ = [run_sphere_fit(a) for a in tqdm(wells, desc="Fitting spheres")]
-    else:
-        _ = process_map(
-                                run_sphere_fit,
-                       wells,
-                                max_workers=n_jobs,
-                                chunksize=1,
-                                desc="Fitting spheres",
-                            )
+        sphere_fits_list = sorted(list(out_root.glob("well????_sphere_fits.csv")))
+        wells = [int(re.search(r"well(\d+)", str(s)).group(1)) for s in sphere_fits_list]
 
     ##############################
     # Project to Healpix spheres
@@ -163,7 +170,7 @@ def project_fields_to_sphere(
     if n_jobs == 1:
         proj_results = [
             run_projection(w=w)
-            for w in tqdm(wells, desc="Projection")
+            for w in tqdm(wells, desc="Doing projections...")
         ]
     else:
         proj_results = process_map(
@@ -171,7 +178,7 @@ def project_fields_to_sphere(
             wells,
             max_workers=n_jobs,
             chunksize=1,
-            desc="Projection",
+            desc="Doing projections...",
         )
 
     return proj_results

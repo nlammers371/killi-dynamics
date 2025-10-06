@@ -85,46 +85,6 @@ def healpix_to_mesh(values, radius, center=(0,0,0)):
     return np.array(verts, float), np.array(faces, int), np.array(vvals, float)
 
 
-def project_to_healpix(vol, center, radius, scale_vec,
-                       nside=64, mode="mean", dist_thresh=50.0):
-    dz, dy, dx = scale_vec
-    Z, Y, X = np.indices(vol.shape)
-    coords = np.c_[Z.ravel()*dz, Y.ravel()*dy, X.ravel()*dx]
-    vals = vol.ravel().astype(float)
-
-    # restrict to spherical shell
-    dR = np.linalg.norm(coords - center[None, :], axis=1) - radius
-    mask = np.abs(dR) <= dist_thresh
-    coords, vals = coords[mask], vals[mask]
-
-    # spherical angles
-    rel = coords - center[None, :]
-    r = np.linalg.norm(rel, axis=1)
-    theta = np.arccos(np.clip(rel[:, 0] / r, -1, 1))
-    phi = np.arctan2(rel[:, 1], rel[:, 2]) % (2*np.pi)
-
-    # map to healpix pixels
-    npix = hp.nside2npix(nside)
-    pix = hp.ang2pix(nside, theta, phi)
-
-    # counts per pixel
-    counts = np.bincount(pix, minlength=npix)
-
-    if mode == "sum":
-        values = np.bincount(pix, weights=vals, minlength=npix)
-    elif mode == "mean":
-        sums = np.bincount(pix, weights=vals, minlength=npix)
-        values = np.divide(sums, counts, out=np.zeros_like(sums), where=counts > 0)
-    elif mode == "max":
-        # np.bincount can't do max; need groupby-style reduction
-        values = np.full(npix, -np.inf)
-        np.maximum.at(values, pix, vals)
-        values[values == -np.inf] = 0.0
-    else:
-        raise ValueError(f"Unknown mode {mode}")
-
-    return values, counts
-
 
 
 def smooth_spherical_grid(grid, sigma_theta=1.0, sigma_phi=1.0, counts=None):
