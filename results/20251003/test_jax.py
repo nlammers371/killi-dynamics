@@ -17,7 +17,7 @@ params = Params2D(
     n=2, p=2, alpha=1.0,
     K_A=667.0, K_NL=667.0, K_I=1.0,
     Lx=1500.0, Ly=1500.0, dx=4.0, dy=4.0,
-    geometry="disk",
+    geometry="rectangle",
 )
 
 blips = BlipSet2D.empty()  # no dynamic events for this test

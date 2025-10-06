@@ -28,7 +28,7 @@ def angular_distance(theta1, phi1, theta2, phi2):
     return jnp.arccos(jnp.clip(cos_d, -1.0, 1.0))
 
 
-def space_kernel_disk(X, Y, centers, sigmas):
+def space_kernel_flat(X, Y, centers, sigmas):
     """Gaussian kernels on a flat disk (Cartesian coords)."""
     if centers.size == 0:
         return jnp.zeros((X.size, 0))
@@ -51,7 +51,7 @@ def space_kernel_sphere(theta: jnp.ndarray, phi: jnp.ndarray,
 
 def laplace_rect(u: jnp.ndarray, dx: float, bc: str = "neumann") -> jnp.ndarray:
     """
-    5-point stencil Laplacian on a flat 2D Cartesian grid with radius cutoff.
+    5-point stencil Laplacian on a flat 2D Cartesian grid
     u: (nx, ny)
     bc: 'neumann' (reflecting) or 'periodic'
     """
@@ -73,48 +73,51 @@ def laplace_rect(u: jnp.ndarray, dx: float, bc: str = "neumann") -> jnp.ndarray:
 
 def laplace_disk(u, dx, mask, bc_rect="neumann", bc_circle="neumann"):
     """5-point Laplacian on a circular mask embedded in a rectangular grid."""
-    if bc_rect == "periodic":
-        u_up = jnp.roll(u, -1, axis=0)
-        u_down = jnp.roll(u, +1, axis=0)
-        u_left = jnp.roll(u, -1, axis=1)
-        u_right = jnp.roll(u, +1, axis=1)
 
-        m_up = jnp.roll(mask, -1, axis=0)
-        m_down = jnp.roll(mask, +1, axis=0)
-        m_left = jnp.roll(mask, -1, axis=1)
-        m_right = jnp.roll(mask, +1, axis=1)
+    raise ValueError("laplace_disk is deprecated; use laplace_rect with masking instead")
 
-    elif bc_rect == "neumann":
-        u_up = jnp.concatenate([u[:1, :], u[:-1, :]], axis=0)
-        u_down = jnp.concatenate([u[1:, :], u[-1:, :]], axis=0)
-        u_left = jnp.concatenate([u[:, :1], u[:, :-1]], axis=1)
-        u_right = jnp.concatenate([u[:, 1:], u[:, -1:]], axis=1)
-
-        m_up = jnp.concatenate([mask[:1, :], mask[:-1, :]], axis=0)
-        m_down = jnp.concatenate([mask[1:, :], mask[-1:, :]], axis=0)
-        m_left = jnp.concatenate([mask[:, :1], mask[:, :-1]], axis=1)
-        m_right = jnp.concatenate([mask[:, 1:], mask[:, -1:]], axis=1)
-    else:
-        raise ValueError("bc_rect must be 'periodic' or 'neumann'")
-
-    if bc_circle == "neumann":
-        u_up_eff    = jnp.where(m_up,    u_up,    u)
-        u_down_eff  = jnp.where(m_down,  u_down,  u)
-        u_left_eff  = jnp.where(m_left,  u_left,  u)
-        u_right_eff = jnp.where(m_right, u_right, u)
-    elif bc_circle == "dirichlet":
-        u_up_eff    = jnp.where(m_up,    u_up,    0.0)
-        u_down_eff  = jnp.where(m_down,  u_down,  0.0)
-        u_left_eff  = jnp.where(m_left,  u_left,  0.0)
-        u_right_eff = jnp.where(m_right, u_right, 0.0)
-    else:
-        raise ValueError("bc_circle must be 'neumann' or 'dirichlet'")
-
-    count = (m_up + m_down + m_left + m_right).astype(u.dtype)
-    sum_nb = u_up_eff + u_down_eff + u_left_eff + u_right_eff
-    lap = (sum_nb - count * u) / (dx * dx)
-
-    return jnp.where(mask, lap, 0.0)
+    # if bc_rect == "periodic":
+    #     u_up = jnp.roll(u, -1, axis=0)
+    #     u_down = jnp.roll(u, +1, axis=0)
+    #     u_left = jnp.roll(u, -1, axis=1)
+    #     u_right = jnp.roll(u, +1, axis=1)
+    #
+    #     m_up = jnp.roll(mask, -1, axis=0)
+    #     m_down = jnp.roll(mask, +1, axis=0)
+    #     m_left = jnp.roll(mask, -1, axis=1)
+    #     m_right = jnp.roll(mask, +1, axis=1)
+    #
+    # elif bc_rect == "neumann":
+    #     u_up = jnp.concatenate([u[:1, :], u[:-1, :]], axis=0)
+    #     u_down = jnp.concatenate([u[1:, :], u[-1:, :]], axis=0)
+    #     u_left = jnp.concatenate([u[:, :1], u[:, :-1]], axis=1)
+    #     u_right = jnp.concatenate([u[:, 1:], u[:, -1:]], axis=1)
+    #
+    #     m_up = jnp.concatenate([mask[:1, :], mask[:-1, :]], axis=0)
+    #     m_down = jnp.concatenate([mask[1:, :], mask[-1:, :]], axis=0)
+    #     m_left = jnp.concatenate([mask[:, :1], mask[:, :-1]], axis=1)
+    #     m_right = jnp.concatenate([mask[:, 1:], mask[:, -1:]], axis=1)
+    # else:
+    #     raise ValueError("bc_rect must be 'periodic' or 'neumann'")
+    #
+    # if bc_circle == "neumann":
+    #     u_up_eff    = jnp.where(m_up,    u_up,    u)
+    #     u_down_eff  = jnp.where(m_down,  u_down,  u)
+    #     u_left_eff  = jnp.where(m_left,  u_left,  u)
+    #     u_right_eff = jnp.where(m_right, u_right, u)
+    # elif bc_circle == "dirichlet":
+    #     u_up_eff    = jnp.where(m_up,    u_up,    0.0)
+    #     u_down_eff  = jnp.where(m_down,  u_down,  0.0)
+    #     u_left_eff  = jnp.where(m_left,  u_left,  0.0)
+    #     u_right_eff = jnp.where(m_right, u_right, 0.0)
+    # else:
+    #     raise ValueError("bc_circle must be 'neumann' or 'dirichlet'")
+    #
+    # count = (m_up + m_down + m_left + m_right).astype(u.dtype)
+    # sum_nb = u_up_eff + u_down_eff + u_left_eff + u_right_eff
+    # lap = (sum_nb - count * u) / (dx * dx)
+    #
+    # return jnp.where(mask, lap, 0.0)
 
 
 def laplace_sphere(u: jnp.ndarray, dtheta: float, dphi: float) -> jnp.ndarray:
@@ -151,7 +154,6 @@ def laplace_sphere(u: jnp.ndarray, dtheta: float, dphi: float) -> jnp.ndarray:
 class Grid2D:
     X: jnp.ndarray
     Y: jnp.ndarray
-    mask: jnp.ndarray
     dx: float
     dy: float
 
@@ -178,23 +180,25 @@ def make_grid(params):
     geom = getattr(params, "geometry", "disk")
 
     if geom == "disk":
+        raise ValueError("Disk geometry is deprecated; use rectangular grid with masking instead")
+
+    elif geom == "rectangle":
+
         # -----------------------------------------
         # Rectangular grid embedding a circular mask
         # -----------------------------------------
         Lx, Ly = params.Lx, params.Ly
-        dx, dy = params.dx, params.dy
+        dx = params.dx
 
         nx = int(round(Lx / dx)) + 1
-        ny = int(round(Ly / dy)) + 1
+        ny = int(round(Ly / dx)) + 1
 
         x = jnp.linspace(-Lx / 2, Lx / 2, nx)
         y = jnp.linspace(-Ly / 2, Ly / 2, ny)
         X, Y = jnp.meshgrid(x, y, indexing="xy")
 
-        r = jnp.sqrt(X**2 + Y**2)
-        mask = r <= min(Lx, Ly) / 2
+        return Grid2D(X=X, Y=Y, dx=dx, dy=dx)
 
-        return Grid2D(X=X, Y=Y, mask=mask, dx=dx, dy=dy)
 
     elif geom == "sphere":
         # -----------------------------------------
