@@ -15,7 +15,6 @@ def init_gaussian_2d(X, Y, amp: float, sigma: float, x0=0.0, y0=0.0):
     return amp * jnp.exp(-0.5 * (((X-x0)**2 + (Y-y0)**2) / (sigma**2)))
 
 def init_multi_gaussian_2d(X, Y, amp: float, sigma: float, n_spots: int, key):
-    nx, ny = X.shape
     # Sample random centers uniformly within bounding box
     x0 = jax.random.uniform(key, shape=(n_spots,), minval=X.min(), maxval=X.max())
     y0 = jax.random.uniform(key, shape=(n_spots,), minval=Y.min(), maxval=Y.max())
@@ -142,15 +141,15 @@ def run_2d(
     return sol.ts, sol.ys
 
 
-def simulate_2d(params, blips, T, nx=101, ny=101, save_ts=None, **init_kwargs):
-    grid = make_grid(params, nx, ny)
-    y0 = build_initial_state_2d(params, grid, **init_kwargs)
-    return run_2d(
-        params,
-        blips,
-        grid,
-        T=T,
-        save_ts=save_ts or jnp.linspace(0, T, 200),
-        y0=y0,
-    )
+# def simulate_2d(params, blips, T, nx=101, ny=101, save_ts=None, **init_kwargs):
+#     grid = make_grid(params, nx, ny)
+#     y0 = build_initial_state_2d(params, grid, **init_kwargs)
+#     return run_2d(
+#         params,
+#         blips,
+#         grid,
+#         T=T,
+#         save_ts=save_ts or jnp.linspace(0, T, 200),
+#         y0=y0,
+#     )
 
