@@ -19,7 +19,7 @@ if __name__ == "__main__":
     # image_list = sorted(list(zarr_path.glob("*.zarr")))
     # image_list = [im for im in image_list if "_z.zarr" not in str(im)]
     t_ind = 20
-    well_ind = 4
+    well_ind = 15
     ch_ind = 1
     R_um = 550
     n_phi = 360

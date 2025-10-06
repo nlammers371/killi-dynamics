@@ -7,6 +7,7 @@ from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map
 from typing import Union
 from functools import partial
+import re
 
 def fit_sphere_with_percentile(points_phys, im_shape, R0=None, weights=None,
                                loss="huber", max_nfev=1000, pct=0.9):
@@ -68,9 +69,14 @@ def fit_sphere_with_percentile(points_phys, im_shape, R0=None, weights=None,
 
     # initial vector
     p0 = np.hstack([c0, R0])
+
+
     # bounds
     lb = [0, im_shape[1]//3, im_shape[2]//3, 400]
     ub = [2000, 2*im_shape[1]//3, 2*im_shape[2]//3, 700]
+
+    p0 = np.max(np.vstack([p0, lb]), axis=0)
+    p0 = np.min(np.vstack([p0, ub]), axis=0)
 
     res = least_squares(residuals, p0, loss=loss, f_scale=f_scale,
                         bounds=(lb, ub), max_nfev=max_nfev)
@@ -141,7 +147,7 @@ def fit_spheres_for_well(
     """
     Fit spheres to a well and save sphere parameters to CSV.
     """
-    mask_path = mask_list[w]
+    mask_path = [m for m in mask_list if int(re.search(r"well(\d+)", str(m)).group(1))==w][0]
     mask_zarr = zarr.open(mask_path, mode="r")
     n_t, *_ = mask_zarr.shape
     scale_vec = np.array(mask_zarr.attrs["voxel_size_um"])
@@ -225,7 +231,7 @@ def sphere_fit_wrapper(
     out_root.mkdir(parents=True, exist_ok=True)
 
     if wells is None:
-        wells = list(range(len(mask_list)))
+        wells = [int(re.search(r"well(\d+)", str(s)).group(1)) for s in mask_list]
 
     ##############################
     # Fit spheres

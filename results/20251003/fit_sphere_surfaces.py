@@ -11,7 +11,7 @@ from src.build_yx1.fit_embryo_surface import sphere_fit_wrapper
 from pathlib import Path
 
 if __name__ == '__main__':
-    project_list = ["20250621", "20250716", "20250731"]
+    project_list = ["20250716", "20250731"]
     # root = Path("/net/trapnell/vol1/home/nlammers/projects/data/killi_tracker/")
     model_name = "tdTom-bright-log-v5"
     root = Path("/media/nick/cluster/projects/data/killi_tracker/")

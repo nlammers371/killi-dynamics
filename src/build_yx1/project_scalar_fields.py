@@ -4,22 +4,16 @@ from pathlib import Path
 import zarr
 from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map
-from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 from typing import Union
 from src.killi_stats.surface_stats import (
-    fit_sphere,
-    remove_background_dog,
     project_to_sphere,
     smooth_spherical_grid, project_to_healpix,
 )
 
-def _dispatch_sphere_fit(args):
-    return fit_spheres_for_well(*args)
 
 def _sphere_projection(args):
     return project_to_sphere(*args)
-
 
 
 def project_well_to_healpix(
@@ -30,7 +24,6 @@ def project_well_to_healpix(
     nside: int,
     proj_mode: str,
     dist_thresh: float,
-    # overwrite: bool = False,
 ):
     """
     Project a well's volumes into Healpix sphere using precomputed sphere fits.
