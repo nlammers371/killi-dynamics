@@ -2,6 +2,7 @@ import jax.numpy as jnp
 from .geom_utils import space_kernel_disk, space_kernel_sphere, laplace_disk, laplace_sphere, laplace_disk
 from .param_classes import Params2D, BlipSet2D
 from symmetry_breaking_JAX.models_1D.JAX_NL_1D import binding_free_N, hill01
+import jax
 
 def build_rhs_2d(params, blips, grid):
     """
@@ -11,10 +12,10 @@ def build_rhs_2d(params, blips, grid):
     geom = params.geometry
 
     if geom == "disk":
-        X, Y, mask = grid
+        X, Y, mask = grid.X, grid.Y, grid.mask
         nxy = X.size
     elif geom == "sphere":
-        Theta, Phi = grid
+        Theta, Phi, R = grid.Theta, grid.Phi, grid.R
         nxy = Theta.size
     else:
         raise ValueError("geometry must be 'disk' or 'sphere'")
@@ -37,6 +38,7 @@ def build_rhs_2d(params, blips, grid):
         return amps * jnp.exp(-0.5*((t - times)/sigma_t)**2) / (jnp.sqrt(2*jnp.pi)*sigma_t)
 
     def rhs(t, y, args):
+
         # unpack
         N = y[0:nxy].reshape(-1)
         L = y[nxy:2*nxy].reshape(-1)
@@ -48,10 +50,11 @@ def build_rhs_2d(params, blips, grid):
         if geom == "disk":
             N_mat = N.reshape(X.shape)
             L_mat = L.reshape(X.shape)
-            lapN = laplace_disk(N_mat, params.dx, mask, params.bc)
-            lapL = laplace_disk(L_mat, params.dx, mask, params.bc)
+            lapN = laplace_disk(N_mat, params.dx, mask, bc_rect=params.bc, bc_circle="neumann")
+            lapL = laplace_disk(L_mat, params.dx, mask, bc_rect=params.bc, bc_circle="neumann")
             dN = params.D_N * lapN.reshape(-1)
             dL = params.D_L * lapL.reshape(-1)
+
         elif geom == "sphere":
             N_mat = N.reshape(Theta.shape)
             L_mat = L.reshape(Theta.shape)
@@ -82,14 +85,13 @@ def build_rhs_2d(params, blips, grid):
         S_L_imp = F_L/jnp.maximum(params.tau_impulse, 1e-12)
 
         # binding + reactions
-          # reuse your 1D helpers
         N_free = binding_free_N(N, L, params.K_I)
-        N_eff = params.alpha * N_free
+        N_eff = N_free
 
-        N_act = params.sigma_N * hill01(N_eff/params.K_A, params.n)
-        L_arg = jnp.where(params.apply_to_L, N_eff, N) / params.K_A
+        N_act = params.sigma_N * hill01(N_eff, params.K_A, params.n)
+        L_arg = jnp.where(params.apply_to_L, N_eff, N)
         L_prod = params.sigma_L * (jnp.power(jnp.clip(L_arg, 0, 1e6), params.p) /
-                                  (jnp.power(params.K_NL/params.K_A, params.p) +
+                                  (jnp.power(params.K_NL, params.p) +
                                    jnp.power(jnp.clip(L_arg, 0, 1e6), params.p)))
 
         N_loss = params.mu_N * N
@@ -98,6 +100,16 @@ def build_rhs_2d(params, blips, grid):
         # total
         dN += N_act - N_loss + S_N_dir + S_N_imp
         dL += L_prod - L_loss + S_L_dir + S_L_imp
+
+        bad_mask = ~jnp.isfinite(dL)
+        count = jnp.sum(bad_mask)
+
+        jax.debug.print(
+            "⚠️ Non-finite dL: {count} cells (min={min}, max={max})",
+            count=count,
+            min=jnp.nanmin(dL),
+            max=jnp.nanmax(dL),
+        )
 
         dN = jnp.nan_to_num(dN, nan=0.0, posinf=0.0, neginf=0.0)
         dL = jnp.nan_to_num(dL, nan=0.0, posinf=0.0, neginf=0.0)

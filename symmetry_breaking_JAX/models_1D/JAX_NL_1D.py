@@ -20,10 +20,12 @@ def laplace_1d(u: jnp.ndarray, dx: float, bc: str = "neumann") -> jnp.ndarray:
     else:
         raise ValueError("bc must be 'periodic' or 'neumann'")
 
-def hill01(x: jnp.ndarray, n: int) -> jnp.ndarray:
+def hill01(x: jnp.ndarray, k,  n: int) -> jnp.ndarray:
     x = jnp.clip(x, 0.0, 1e6)
+    k = jnp.clip(k, 0.0, 1e6)
     xn = jnp.power(x, n)
-    return xn / (1.0 + xn)
+    kn = jnp.power(k, n)
+    return xn / (kn + xn)
 
 
 def binding_free_N(N, L, K_I, KI_tol=1e-9):

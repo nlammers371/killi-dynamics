@@ -1,4 +1,5 @@
 import jax.numpy as jnp
+from dataclasses import dataclass
 
 def make_grid_disk(nx, ny, Lx, Ly):
     """Cartesian grid covering a disk of radius min(Lx,Ly)/2."""
@@ -27,13 +28,17 @@ def angular_distance(theta1, phi1, theta2, phi2):
     return jnp.arccos(jnp.clip(cos_d, -1.0, 1.0))
 
 
-def space_kernel_disk(x: jnp.ndarray, y: jnp.ndarray,
-                      x0: jnp.ndarray, y0: jnp.ndarray, sigma: float):
-    """Gaussian kernel in flat 2D Cartesian coordinates."""
-    dx = x[:, None] - x0[None, :]
-    dy = y[:, None] - y0[None, :]
+def space_kernel_disk(X, Y, centers, sigmas):
+    """Gaussian kernels on a flat disk (Cartesian coords)."""
+    if centers.size == 0:
+        return jnp.zeros((X.size, 0))
+    Xf = X.reshape(-1, 1)
+    Yf = Y.reshape(-1, 1)
+    dx = Xf - centers[:, 0]
+    dy = Yf - centers[:, 1]
     r2 = dx**2 + dy**2
-    return jnp.exp(-0.5 * r2 / (sigma**2))
+    # broadcast sigmas to shape (M,)
+    return jnp.exp(-0.5 * (r2 / (sigmas[None, :]**2)))
 
 
 def space_kernel_sphere(theta: jnp.ndarray, phi: jnp.ndarray,
@@ -42,21 +47,6 @@ def space_kernel_sphere(theta: jnp.ndarray, phi: jnp.ndarray,
     dist = angular_distance(theta[:, None], phi[:, None],
                             theta0[None, :], phi0[None, :])
     return jnp.exp(-0.5 * (dist/sigma_ang)**2)
-
-def space_kernel_sphere(theta, phi, theta0, phi0, sigma_abs, R=1.0):
-    """Gaussian kernel on a sphere, width sigma_abs in same units as R."""
-    dist_ang = angular_distance(theta[:, None], phi[:, None],
-                                theta0[None, :], phi0[None, :])  # radians
-    dist_abs = R * dist_ang
-    return jnp.exp(-0.5 * (dist_abs / sigma_abs)**2)
-
-def space_kernel_sphere(theta, phi, theta0, phi0, sigma_abs, R=1.0):
-    """Gaussian kernel on a sphere, width sigma_abs in same units as R."""
-    dist_ang = angular_distance(theta[:, None], phi[:, None],
-                                theta0[None, :], phi0[None, :])  # radians
-    dist_abs = R * dist_ang
-    return jnp.exp(-0.5 * (dist_abs / sigma_abs)**2)
-
 
 
 def laplace_rect(u: jnp.ndarray, dx: float, bc: str = "neumann") -> jnp.ndarray:
@@ -84,25 +74,26 @@ def laplace_rect(u: jnp.ndarray, dx: float, bc: str = "neumann") -> jnp.ndarray:
 def laplace_disk(u, dx, mask, bc_rect="neumann", bc_circle="neumann"):
     """5-point Laplacian on a circular mask embedded in a rectangular grid."""
     if bc_rect == "periodic":
-        u_up    = jnp.roll(u, -1, axis=0)
-        u_down  = jnp.roll(u, +1, axis=0)
-        u_left  = jnp.roll(u, -1, axis=1)
+        u_up = jnp.roll(u, -1, axis=0)
+        u_down = jnp.roll(u, +1, axis=0)
+        u_left = jnp.roll(u, -1, axis=1)
         u_right = jnp.roll(u, +1, axis=1)
 
-        m_up    = jnp.roll(mask, -1, axis=0)
-        m_down  = jnp.roll(mask, +1, axis=0)
-        m_left  = jnp.roll(mask, -1, axis=1)
+        m_up = jnp.roll(mask, -1, axis=0)
+        m_down = jnp.roll(mask, +1, axis=0)
+        m_left = jnp.roll(mask, -1, axis=1)
         m_right = jnp.roll(mask, +1, axis=1)
-    elif bc_rect == "neumann":
-        u_up    = jnp.concatenate([u[:1, :],  u[:-1, :]], axis=0)
-        u_down  = jnp.concatenate([u[1:, :],  u[-1:, :]], axis=0)
-        u_left  = jnp.concatenate([u[:, :1],  u[:, :-1]], axis=1)
-        u_right = jnp.concatenate([u[:, 1:],  u[:, -1:]], axis=1)
 
-        m_up    = jnp.concatenate([mask[:1, :],  mask[:-1, :]], axis=0)
-        m_down  = jnp.concatenate([mask[1:, :],  mask[-1:, :]], axis=0)
-        m_left  = jnp.concatenate([mask[:, :1],  mask[:, :-1]], axis=1)
-        m_right = jnp.concatenate([mask[:, 1:],  mask[:, :-1]], axis=1)
+    elif bc_rect == "neumann":
+        u_up = jnp.concatenate([u[:1, :], u[:-1, :]], axis=0)
+        u_down = jnp.concatenate([u[1:, :], u[-1:, :]], axis=0)
+        u_left = jnp.concatenate([u[:, :1], u[:, :-1]], axis=1)
+        u_right = jnp.concatenate([u[:, 1:], u[:, -1:]], axis=1)
+
+        m_up = jnp.concatenate([mask[:1, :], mask[:-1, :]], axis=0)
+        m_down = jnp.concatenate([mask[1:, :], mask[-1:, :]], axis=0)
+        m_left = jnp.concatenate([mask[:, :1], mask[:, :-1]], axis=1)
+        m_right = jnp.concatenate([mask[:, 1:], mask[:, -1:]], axis=1)
     else:
         raise ValueError("bc_rect must be 'periodic' or 'neumann'")
 
@@ -153,3 +144,74 @@ def laplace_sphere(u: jnp.ndarray, dtheta: float, dphi: float) -> jnp.ndarray:
     term_phi = (u_phi_plus - 2.0*u + u_phi_minus) / (dphi**2)
 
     return term_theta + term_phi/(sin_t_safe**2)
+
+
+
+@dataclass
+class Grid2D:
+    X: jnp.ndarray
+    Y: jnp.ndarray
+    mask: jnp.ndarray
+    dx: float
+    dy: float
+
+@dataclass
+class SphereGrid:
+    Theta: jnp.ndarray
+    Phi: jnp.ndarray
+    R: float
+    dtheta: float
+    dphi: float
+
+def make_grid(params):
+    """
+    Build a spatial grid based on `params.geometry`.
+
+    For disk geometry:
+        - uses params.Lx, params.Ly, params.dx, params.dy
+        - returns Grid2D(X, Y, mask, dx, dy)
+
+    For sphere geometry:
+        - uses params.R, params.n_theta, params.n_phi
+        - returns GridSphere(Theta, Phi, R, dtheta, dphi)
+    """
+    geom = getattr(params, "geometry", "disk")
+
+    if geom == "disk":
+        # -----------------------------------------
+        # Rectangular grid embedding a circular mask
+        # -----------------------------------------
+        Lx, Ly = params.Lx, params.Ly
+        dx, dy = params.dx, params.dy
+
+        nx = int(round(Lx / dx)) + 1
+        ny = int(round(Ly / dy)) + 1
+
+        x = jnp.linspace(-Lx / 2, Lx / 2, nx)
+        y = jnp.linspace(-Ly / 2, Ly / 2, ny)
+        X, Y = jnp.meshgrid(x, y, indexing="xy")
+
+        r = jnp.sqrt(X**2 + Y**2)
+        mask = r <= min(Lx, Ly) / 2
+
+        return Grid2D(X=X, Y=Y, mask=mask, dx=dx, dy=dy)
+
+    elif geom == "sphere":
+        # -----------------------------------------
+        # Spherical surface grid
+        # -----------------------------------------
+        R = params.R
+        n_theta = getattr(params, "n_theta", 128)
+        n_phi = getattr(params, "n_phi", 256)
+
+        theta = jnp.linspace(0.0, jnp.pi, n_theta)
+        phi = jnp.linspace(0.0, 2.0 * jnp.pi, n_phi)
+        Theta, Phi = jnp.meshgrid(theta, phi, indexing="ij")
+
+        dtheta = float(jnp.pi / (n_theta - 1))
+        dphi = float(2.0 * jnp.pi / n_phi)
+
+        return SphereGrid(Theta=Theta, Phi=Phi, R=R, dtheta=dtheta, dphi=dphi)
+
+    else:
+        raise ValueError(f"Unknown geometry: {geom}")
