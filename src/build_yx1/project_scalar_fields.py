@@ -77,7 +77,7 @@ def project_well_to_healpix(
     sphere_df = pd.read_csv(sphere_csv)
 
     # Output zarr for projected fields
-    field_path = out_root / f"well{w:04}_fields.zarr"
+    field_path = out_root / f"well{w:04}_fields_{nside:04}.zarr"
     
     field_store = zarr.open(field_path, mode="a")
 
