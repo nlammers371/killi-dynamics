@@ -15,7 +15,7 @@ if __name__ == "__main__":
 
     sweep_name = "sweep01_jax_stable"
     root = Path("/media/nick/hdd021/Cole Trapnell's Lab Dropbox/Nick Lammers/Nick/symmetry_breaking/pde/sweeps/")
-    output_dir = ensure_output_dir(root / sweep_name)
+    # output_dir = ensure_output_dir(root / sweep_name)
 
     # Grid + sample settings
     grid_type = "lhs"
