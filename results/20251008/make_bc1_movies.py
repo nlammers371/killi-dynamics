@@ -5,20 +5,20 @@ from pathlib import Path
 if __name__ == '__main__':
 
     root = Path("/media/nick/cluster/projects/data/killi_tracker/")
-    project_list = ["20250716", "20250731"]
+    project_list = ["20250621", "20250716", "20250731"]
     well_list = [None, None, None]
-    channel = [1, 1, 0]
-    dt_vec = [73/60, 68/60]
+    channel = [0, 0, 0]
+    dt_vec = [47/60, 73/60, 68/60]
     dt_target = 0.75
-    proj_mode = "density" #"mean"
+    proj_mode = "mean" #"mean"
     overwrite = True
     nside = 128
     sigma_t = 0.75
-    sigma_deg = 10
-    deg_vec = [60, 72]
-    n_workers = 10
+    sigma_deg = 8
+    deg_vec = [65, 60, 75]
+    n_workers = 8
 
-    for p, proj in enumerate(project_list):
+    for p, proj in enumerate(project_list[:-1]):
         healpix_to_mp4_v2(
             root=root,
             project_name=proj,
@@ -34,7 +34,7 @@ if __name__ == '__main__':
             temporal_sigma_hours=sigma_t,
             plot_kwargs=dict(
                 bins=256,
-                cmap="magma",
+                cmap="turbo",
                 hemisphere="south",
                 fov_deg=deg_vec[p],
                 smooth_fwhm_deg=sigma_deg,

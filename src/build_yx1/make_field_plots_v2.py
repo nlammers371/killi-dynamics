@@ -18,6 +18,8 @@ from typing import Union
 from tqdm import tqdm
 from scipy.ndimage import gaussian_filter1d
 from scipy.interpolate import interp1d
+from functools import partial
+from tqdm.contrib.concurrent import process_map
 
 # ==============================================================
 #  Low-level geometry + raster helpers
@@ -115,7 +117,7 @@ def plot_healpix_equalarea_from_frame(
     cmap="viridis",
     vmin=None,
     vmax=None,
-    pct=(1, 99),
+    pct=(1, 99.8),
     smooth_fwhm_deg=None,
     fov_deg=90.0,
     rescale_to_fill=False,
@@ -142,7 +144,7 @@ def plot_healpix_equalarea_from_frame(
     img = _raster_mean(frame, ix, iy, mask_in, bins, disk_mask)
 
     # color limits
-    if vmin is None or vmax is None:
+    if  vmin is None or vmax is None:
         finite_vals = frame[np.isfinite(frame)]
         if finite_vals.size > 0:
             lo, hi = np.percentile(finite_vals, pct)
@@ -213,7 +215,65 @@ def get_intensity_bounds_from_last_frame(zarr_path, channel=0,
     lo, hi = np.percentile(finite_vals, pct)
     return lo, hi
 
+def make_well_plots(well,
+                    project_name,
+                    field_list,
+                    out_root,
+                    values_key,
+                    dt_hours,
+                    target_dt_hours,
+                    temporal_sigma_hours,
+                    interp_kind,
+                    dpi,
+                    plot_kwargs,
+                    overwrite,
+                    channel):
 
+    zarr_path = [m for m in field_list if int(re.search(r"well(\d+)", str(m)).group(1)) == well][0]
+    zarr_path = Path(zarr_path)
+    out_path = out_root / f"{project_name}_well{well:04}_{values_key}"
+    out_path.mkdir(parents=True, exist_ok=True)
+
+    series_TN = _load_time_series_1ch(zarr_path, values_key=values_key, channel=channel)
+
+    if values_key == "density":
+        N = series_TN.shape[1];
+        A = 4 * np.pi * 600 ** 2;
+        a = A / N
+        series_TN = series_TN / a
+
+    if dt_hours is None:
+        raise ValueError("Please supply dt_hours for temporal smoothing/interpolation.")
+    series_out, t_out = temporal_smooth_and_resample(
+        series_TN, dt_hours=dt_hours,
+        target_dt_hours=target_dt_hours,
+        temporal_sigma_hours=temporal_sigma_hours,
+        kind=interp_kind,
+    )
+
+    if False: #scale_from_smoothed:
+        vmin = vmax = None
+    else:
+        vmin, vmax = get_intensity_bounds_from_last_frame(
+            zarr_path, channel,
+            smooth_fwhm_deg=plot_kwargs.get("smooth_fwhm_deg"),
+            values_key=values_key, pct=(1, 99.8)
+        )
+        vmax = 0.875 * vmax
+
+    print(f"Rendering {series_out.shape[0]} frames for well {well:04d} ...")
+    for t_idx in range(series_out.shape[0]):
+        frame_file = out_path / f"{zarr_path.stem}_frame{t_idx:04d}.png"
+        if not frame_file.exists() or overwrite:
+            plot_healpix_equalarea_from_frame(
+                series_out[t_idx],
+                save_path=frame_file,
+                vmin=vmin,
+                vmax=vmax,
+                **plot_kwargs,
+                dpi=dpi,
+            )
+    print(f"✅ Saved {series_out.shape[0]} frames to {out_path}")
 # ==============================================================
 #  Main driver
 # ==============================================================
@@ -224,9 +284,7 @@ def healpix_to_mp4_v2(
     wells=None,
     values_key="max",
     channel=0,
-    fps=12,
     nside=64,
-    mode="png",
     overwrite=False,
     plot_kwargs=None,
     dpi=600,
@@ -235,7 +293,7 @@ def healpix_to_mp4_v2(
     target_dt_hours=None,
     temporal_sigma_hours=None,
     interp_kind="linear",
-    scale_from_smoothed=False,
+    n_jobs=1,
 ):
     """
     Render Healpix zarr time series with temporal smoothing/interpolation.
@@ -250,50 +308,32 @@ def healpix_to_mp4_v2(
     if wells is None:
         wells = [int(re.search(r"well(\d+)", str(s)).group(1)) for s in field_list]
 
-    for well in tqdm(wells, desc="Rendering wells"):
-        zarr_path = [m for m in field_list if int(re.search(r"well(\d+)", str(m)).group(1)) == well][0]
-        zarr_path = Path(zarr_path)
-        out_path = out_root / f"{project_name}_well{well:04}_{values_key}"
-        out_path.mkdir(parents=True, exist_ok=True)
+    plot_well = partial(make_well_plots,
+                        project_name=project_name,
+                        field_list=field_list,
+                        out_root=out_root,
+                        values_key=values_key,
+                        dt_hours=dt_hours,
+                        target_dt_hours=target_dt_hours,
+                        temporal_sigma_hours=temporal_sigma_hours,
+                        interp_kind=interp_kind,
+                        dpi=dpi,
+                        plot_kwargs=plot_kwargs,
+                        overwrite=overwrite,
+                        channel=channel)
 
-        series_TN = _load_time_series_1ch(zarr_path, values_key=values_key, channel=channel)
-
-        if values_key == "density":
-            N = series_TN.shape[1]; A = 4*np.pi*600**2; a = A/N
-            series_TN = series_TN / a
-
-        if dt_hours is None:
-            raise ValueError("Please supply dt_hours for temporal smoothing/interpolation.")
-        series_out, t_out = temporal_smooth_and_resample(
-            series_TN, dt_hours=dt_hours,
-            target_dt_hours=target_dt_hours,
-            temporal_sigma_hours=temporal_sigma_hours,
-            kind=interp_kind,
+    if n_jobs == 1:
+        _ = [plot_well(a) for a in tqdm(wells, desc="Calculating density fields")]
+    else:
+        _ = process_map(
+            plot_well,
+            wells,
+            max_workers=n_jobs,
+            chunksize=1,
+            desc="Calculating density fields",
         )
 
-        if scale_from_smoothed:
-            vmin = vmax = None
-        else:
-            vmin, vmax = get_intensity_bounds_from_last_frame(
-                zarr_path, channel,
-                smooth_fwhm_deg=plot_kwargs.get("smooth_fwhm_deg"),
-                values_key=values_key, pct=(1, 99.8)
-            )
-            vmax = 0.9 * vmax
 
-        print(f"Rendering {series_out.shape[0]} frames for well {well:04d} ...")
-        for t_idx in range(series_out.shape[0]):
-            frame_file = out_path / f"{zarr_path.stem}_frame{t_idx:04d}.png"
-            if not frame_file.exists() or overwrite:
-                plot_healpix_equalarea_from_frame(
-                    series_out[t_idx],
-                    save_path=frame_file,
-                    vmin=vmin, vmax=vmax,
-                    **plot_kwargs,
-                    dpi=dpi,
-                )
-        if mode == "png":
-            print(f"✅ Saved {series_out.shape[0]} frames to {out_path}")
 
 # ==============================================================
 #  Usage example
