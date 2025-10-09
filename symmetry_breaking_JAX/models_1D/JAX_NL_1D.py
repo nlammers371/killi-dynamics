@@ -203,11 +203,9 @@ def build_rhs_1d(x: jnp.ndarray, params: Params1D, blips: BlipSet1D):
         N_free = binding_free_N(N, L, params.K_I)
         N_eff = alpha * N_free
 
-        N_act = params.sigma_N * hill01(N_eff / params.K_A, params.n)
-        L_arg = jnp.where(params.apply_to_L, N_eff, N) / params.K_A
-        L_prod = params.sigma_L * (jnp.power(jnp.clip(L_arg, 0, 1e6), params.p) /
-                                   (jnp.power(params.K_NL / params.K_A, params.p) +
-                                    jnp.power(jnp.clip(L_arg, 0, 1e6), params.p)))
+        N_act = params.sigma_N * hill01(N_eff, k=params.K_A, n=params.n)
+        L_arg = jnp.where(params.apply_to_L, N_eff, N)
+        L_prod = params.sigma_L * hill01(L_arg, k=params.K_NL, n=params.p)
 
         N_loss = params.mu_N * N
         L_loss = params.mu_L * L

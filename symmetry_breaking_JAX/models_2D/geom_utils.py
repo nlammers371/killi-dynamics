@@ -70,6 +70,35 @@ def laplace_rect(u: jnp.ndarray, dx: float, bc: str = "neumann") -> jnp.ndarray:
 
     return (u_up + u_down + u_left + u_right - 4.0 * u) / (dx * dx)
 
+def laplace_rect_9pt(u: jnp.ndarray, dx: float, bc: str = "neumann") -> jnp.ndarray:
+    """
+    9-point Laplacian with improved rotational isotropy.
+    Stencil (centered at u_ij):
+        (1)  corners: NE,NW,SE,SW weight = 1
+        (2)  cross  : N,S,E,W       weight = 4
+        (3)  center : C             weight = -20
+    L(u) = [4*(N+S+E+W) + (NE+NW+SE+SW) - 20*C] / (6*dx^2)
+    """
+    if bc == "periodic":
+        uN = jnp.roll(u, -1, axis=0); uS = jnp.roll(u, +1, axis=0)
+        uE = jnp.roll(u, -1, axis=1); uW = jnp.roll(u, +1, axis=1)
+        uNE = jnp.roll(uN, -1, axis=1); uNW = jnp.roll(uN, +1, axis=1)
+        uSE = jnp.roll(uS, -1, axis=1); uSW = jnp.roll(uS, +1, axis=1)
+    elif bc == "neumann":
+        # copy-edge (reflecting) padding
+        uN  = jnp.concatenate([u[1: , :], u[-1:, :]], axis=0)
+        uS  = jnp.concatenate([u[:1 , :], u[:-1, :]], axis=0)
+        uE  = jnp.concatenate([u[:, 1: ], u[:, -1:]], axis=1)
+        uW  = jnp.concatenate([u[:, :1 ], u[:, :-1]], axis=1)
+        uNE = jnp.concatenate([uN[:, 1:],  uN[:, -1: ]], axis=1)
+        uNW = jnp.concatenate([uN[:, :1],  uN[:, :-1 ]], axis=1)
+        uSE = jnp.concatenate([uS[:, 1:],  uS[:, -1: ]], axis=1)
+        uSW = jnp.concatenate([uS[:, :1],  uS[:, :-1 ]], axis=1)
+    else:
+        raise ValueError("bc must be 'periodic' or 'neumann'")
+
+    num = 4*(uN + uS + uE + uW) + (uNE + uNW + uSE + uSW) - 20.0*u
+    return num / (6.0 * dx * dx)
 
 def laplace_disk(u, dx, mask, bc_rect="neumann", bc_circle="neumann"):
     """5-point Laplacian on a circular mask embedded in a rectangular grid."""
@@ -177,7 +206,7 @@ def make_grid(params):
         - uses params.R, params.n_theta, params.n_phi
         - returns GridSphere(Theta, Phi, R, dtheta, dphi)
     """
-    geom = getattr(params, "geometry", "disk")
+    geom = params["geometry"]
 
     if geom == "disk":
         raise ValueError("Disk geometry is deprecated; use rectangular grid with masking instead")
@@ -187,8 +216,8 @@ def make_grid(params):
         # -----------------------------------------
         # Rectangular grid embedding a circular mask
         # -----------------------------------------
-        Lx, Ly = params.Lx, params.Ly
-        dx = params.dx
+        Lx, Ly = params["Lx"], params["Ly"]
+        dx = params["dx"]
 
         nx = int(round(Lx / dx)) + 1
         ny = int(round(Ly / dx)) + 1

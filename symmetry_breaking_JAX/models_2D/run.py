@@ -36,7 +36,6 @@ def init_gaussian_sphere(Theta, Phi, amp: float, sigma_abs: float, R: float, cen
     return amp * jnp.exp(-0.5 * (dist_abs/sigma_abs)**2)
 
 def build_initial_state_2d(
-    params,
     grid,
     *,
     N_positions: jnp.ndarray | None = None,  # (n_spots, 2)
@@ -59,14 +58,16 @@ def build_initial_state_2d(
     - Lefty: constant or zero
     """
     X, Y = grid.X, grid.Y
-
+    Lx = X.max() - X.min()
+    Ly = Y.max() - Y.min()
+    dx = np.abs(X[0, 0] - X[0, 1])
     # -- Handle random placement if needed --
     if N_positions is None and n_N_spots > 0:
         if N_key is None:
             N_key = jax.random.PRNGKey(np.random.randint(0, 1e9))
         key_r, key_theta = jax.random.split(N_key)
         r = jnp.sqrt(jax.random.uniform(key_r, shape=(n_N_spots,))) * (
-            min(params.Lx, params.Ly) / 2.0 - 2.0 * params.dx
+            min(Lx, Ly) / 2.0 - 2.0 * dx
         )
         theta = 2 * jnp.pi * jax.random.uniform(key_theta, shape=(n_N_spots,))
         N_positions = jnp.stack([r * jnp.cos(theta), r * jnp.sin(theta)], axis=1)

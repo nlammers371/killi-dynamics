@@ -1,5 +1,5 @@
 import jax.numpy as jnp
-from .geom_utils import space_kernel_flat, space_kernel_sphere, laplace_rect, laplace_sphere, laplace_disk
+from .geom_utils import space_kernel_flat, space_kernel_sphere, laplace_rect, laplace_sphere, laplace_rect_9pt, laplace_disk
 from .param_classes import Params2D, BlipSet2D
 from .functions import binding_free_N, hill01
 import jax
@@ -61,8 +61,8 @@ def build_rhs_2d(params, blips, grid):
         elif geom == "rectangle":
             N_mat = N.reshape(X.shape)
             L_mat = L.reshape(X.shape)
-            lapN = laplace_rect(N_mat, params.dx, bc=params.bc)
-            lapL = laplace_rect(L_mat, params.dx, bc=params.bc)
+            lapN = laplace_rect_9pt(N_mat, params.dx, bc=params.bc)
+            lapL = laplace_rect_9pt(L_mat, params.dx, bc=params.bc)
             dN = params.D_N * lapN.reshape(-1)
             dL = params.D_L * lapL.reshape(-1)
 

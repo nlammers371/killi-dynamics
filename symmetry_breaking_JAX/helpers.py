@@ -1,4 +1,4 @@
-from symmetry_breaking_JAX.models.JAX_NL_1D import run_1d, Params1D, BlipSet1D, build_initial_state_1d
+from symmetry_breaking_JAX.models_1D.JAX_NL_1D import run_1d, Params1D, BlipSet1D, build_initial_state_1d
 import jax.numpy as jnp
 import numpy as np
 import os
