@@ -1,6 +1,11 @@
 """Legacy entrypoints for nuclei segmentation (deprecated)."""
 from warnings import warn
 
+from src.segmentation.cellpose import (
+    cellpose_segmentation,
+    segment_FOV,
+    segment_fov,
+)
 from src.segmentation.mask_builders import (
     do_hierarchical_watershed,
     perform_li_segmentation,
@@ -24,9 +29,12 @@ warn(
 __all__ = [
     "calculate_li_thresh",
     "calculate_li_trend",
+    "cellpose_segmentation",
     "do_hierarchical_watershed",
     "estimate_li_thresh",
     "extract_random_quadrant",
     "perform_li_segmentation",
+    "segment_FOV",
+    "segment_fov",
     "segment_nuclei",
 ]
