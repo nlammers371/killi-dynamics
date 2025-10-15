@@ -28,7 +28,7 @@ that the larger refactor can proceed in small, reviewable increments.
 
 While the codebase stabilizes, favor a two-tier workflow:
 
-- **Command-line entry points** (to be added under `src/pipelines/`) will handle deterministic export/segment/track jobs using
+- **Command-line entry points** (e.g., `src/pipelines/lightsheet_cli.py`) handle deterministic export/segment/track jobs using
   configuration files for reproducibility.
 - **Curated Jupyter notebooks** remain the venue for exploratory QC or visualization tasks and can call the CLI when deterministic
   steps are needed.

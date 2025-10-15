@@ -1,7 +1,5 @@
-"""Placeholder namespace for future pipeline entry points.
+"""High-level pipeline entry points and CLIs."""
 
-Orchestration scripts will eventually live here once the supporting
-modules have migrated into the domain packages.
-"""
+from .lightsheet_cli import run_lightsheet_pipeline
 
-__all__: list[str] = []
+__all__ = ["run_lightsheet_pipeline"]
