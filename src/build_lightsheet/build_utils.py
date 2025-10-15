@@ -7,7 +7,6 @@ from numpy.typing import ArrayLike
 from tqdm import tqdm
 from zarr.storage import Store
 from skimage.measure import regionprops, label
-from src.build_killi.fit_embryo_surface import *
 from functools import partial
 from tqdm.contrib.concurrent import process_map
 import multiprocessing
@@ -18,6 +17,13 @@ import skimage.segmentation as segm
 import scipy.ndimage as ndi
 from glob2 import glob
 from scipy.ndimage import mean as ndi_mean
+
+from src.geometry import (
+    create_sh_mesh,
+    create_sphere_mesh,
+    fit_sphere,
+    fit_sphere_and_sh,
+)
 
 
 def add_spherical_mask(mask, center, radius, scale_vec, value=1):
