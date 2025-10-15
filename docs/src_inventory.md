@@ -48,6 +48,7 @@ src/
         ├── __init__.py
     ├── segmentation/
         ├── __init__.py
+        ├── cellpose.py
         ├── mask_builders.py
         ├── postprocess.py
         ├── thresholding.py
