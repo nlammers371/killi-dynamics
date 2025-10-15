@@ -41,7 +41,9 @@ def build_initial_state_2d(
     N_positions: jnp.ndarray | None = None,  # (n_spots, 2)
     N_amps: jnp.ndarray | None = None,       # (n_spots,)
     N_sigmas: jnp.ndarray | None = None,     # (n_spots,)
-    N_mode: str = "gaussian",                # "gaussian" uses spots; "constant" or "none" override it
+    N_mode: str = "gaussian",                # "gaussian", "constant", "none", or "array"
+    N_array: jnp.ndarray | None = None,      # custom 2D initialization pattern
+    N_scale_range: tuple[float, float] | None = None,  # (min, max) rescale range
     N_amp_default: float = 0.0,
     N_sigma_default: float = 10.0,
     n_N_spots: int = 0,                      # ignored if N_positions given
@@ -53,15 +55,17 @@ def build_initial_state_2d(
     """
     Universal 2D initializer.
 
-    - If N_positions is provided → use it directly (one Gaussian per row)
-    - Else, randomly sample n_N_spots inside disk
+    - N_mode == "gaussian" → one Gaussian per (x0, y0, amp, sigma)
+    - N_mode == "array" → directly use provided N_array, optionally rescaled
+    - N_mode == "constant" or "none" → uniform initialization
     - Lefty: constant or zero
     """
     X, Y = grid.X, grid.Y
     Lx = X.max() - X.min()
     Ly = Y.max() - Y.min()
     dx = np.abs(X[0, 0] - X[0, 1])
-    # -- Handle random placement if needed --
+
+    # -- Random placement if needed --
     if N_positions is None and n_N_spots > 0:
         if N_key is None:
             N_key = jax.random.PRNGKey(np.random.randint(0, 1e9))
@@ -73,13 +77,12 @@ def build_initial_state_2d(
         N_positions = jnp.stack([r * jnp.cos(theta), r * jnp.sin(theta)], axis=1)
         N_sigmas = jnp.ones(n_N_spots) * N_sigma_default if N_sigmas is None else N_sigmas
         N_amps = jnp.ones(n_N_spots) * N_amp_default if N_amps is None else N_amps
-
     elif N_positions is None:
         N_positions = jnp.zeros((0, 2))
         N_sigmas = jnp.zeros((0,))
         N_amps = jnp.zeros((0,))
 
-    # -- Build fields --
+    # -- Build Nodal field --
     if N_mode == "none":
         N0 = jnp.zeros_like(X)
     elif N_mode == "constant":
@@ -89,9 +92,20 @@ def build_initial_state_2d(
             x0, y0, amp, sigma = args
             bump = amp * jnp.exp(-0.5 * ((X - x0) ** 2 + (Y - y0) ** 2) / (sigma ** 2))
             return accum + bump
-
         args = jnp.column_stack([N_positions[:, 0], N_positions[:, 1], N_amps, N_sigmas])
         N0 = jax.lax.fori_loop(0, args.shape[0], lambda i, acc: add_spot(acc, args[i]), jnp.zeros_like(X))
+    elif N_mode == "array":
+        if N_array is None:
+            raise ValueError("N_array must be provided when N_mode='array'")
+        if N_array.shape != X.shape:
+            raise ValueError(f"N_array shape {N_array.shape} must match grid shape {X.shape}")
+        N0 = N_array.astype(jnp.float32)
+        if N_scale_range is not None:
+            Nmin, Nmax = N_scale_range
+            arr_min = jnp.nanmin(N0)
+            arr_max = jnp.nanmax(N0)
+            N0 = (N0 - arr_min) / (arr_max - arr_min + 1e-12)
+            N0 = Nmin + N0 * (Nmax - Nmin)
     else:
         raise ValueError(f"Unknown N_mode '{N_mode}'")
 
@@ -103,6 +117,7 @@ def build_initial_state_2d(
 
     y0 = jnp.concatenate([N0.ravel(), L0.ravel(), rho0.ravel(), F_N0.ravel(), F_L0.ravel()])
     return y0
+
 
 
 # ----------------------------

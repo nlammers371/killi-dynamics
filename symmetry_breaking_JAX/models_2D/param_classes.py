@@ -23,6 +23,11 @@ class Params2D:
     # Geometry / numerics
     geometry: str = "disk"  # "disk" or "sphere"
 
+    # N init mdoe
+    N_init_array: jnp.ndarray | None = None  # shape (nx, ny) if mode="array"
+    N_init_mode: str = "gaussian"  # "array", "gaussian", "constant", "random"
+    N_scale_range: tuple[float, float] | None = None  # (min, max) rescale range
+
     # Disk parameters
     Lx: float = 1500.0
     Ly: float = 1500.0

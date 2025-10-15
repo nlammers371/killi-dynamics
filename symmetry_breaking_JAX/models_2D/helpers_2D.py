@@ -6,33 +6,47 @@ import jax.numpy as jnp
 
 def single_run_2D(dim_p, grid, T, n_save_points=121):
 
-    X, Y = grid.X, grid.Y
-    Lx = X.max() - X.min()
-    Ly = Y.max() - Y.min()
-    dx = jnp.abs(X[0, 0] - X[0, 1])
+    if dim_p["geometry"] == "rectangle":
+        X, Y = grid.X, grid.Y
+        Lx = X.max() - X.min()
+        Ly = Y.max() - Y.min()
+        dx = jnp.abs(X[0, 0] - X[0, 1])
 
-    # Build Params1D dataclass from dim_p dict
-    p = Params2D(
-        D_N=dim_p["D_N"], D_L=dim_p["D_L"],
-        sigma_N=dim_p["sigma_N"], sigma_L=dim_p["sigma_L"],
-        mu_N=dim_p["mu_N"], mu_L=dim_p["mu_L"],
-        n=2, p=2, alpha=1.0,
-        K_A=dim_p["K_A"], K_NL=dim_p["K_NL"], K_I=dim_p["K_I"],
-        Lx=Lx, Ly=Ly, bc=dim_p["bc"], dx=float(dx), dy=float(dx),
-        tau_impulse=60.0,
-        sigma_t_direct=0.1, geometry=dim_p["geometry"]
-    )
+        # Build Params1D dataclass from dim_p dict
+        p = Params2D(
+            D_N=dim_p["D_N"], D_L=dim_p["D_L"],
+            sigma_N=dim_p["sigma_N"], sigma_L=dim_p["sigma_L"],
+            mu_N=dim_p["mu_N"], mu_L=dim_p["mu_L"],
+            n=2, p=2, alpha=1.0,
+            K_A=dim_p["K_A"], K_NL=dim_p["K_NL"], K_I=dim_p["K_I"],
+            Lx=Lx, Ly=Ly, bc=dim_p["bc"], dx=float(dx), dy=float(dx),
+            tau_impulse=60.0,
+            sigma_t_direct=0.1, geometry=dim_p["geometry"],
+            N_init_mode=dim_p.get("N_init_mode", "gaussian"),
+            N_scale_range=dim_p.get("N_scale_range", None),
+            N_init_array=dim_p.get("N_init_array", None)
+        )
+    else:
+        raise NotImplementedError(f"Geometry {dim_p['geometry']} not implemented yet.")
 
     # No stochastic blips for now
     blips = BlipSet2D.empty()
 
     # Initial condition
-    y0 = build_initial_state_2d(
-        grid,
-        N_mode="gaussian", N_positions=dim_p["N_positions"], N_sigmas=dim_p["N_sigmas"], N_amps=dim_p["N_amps"],
-        L_mode="constant", L_amp=dim_p["L_amp"],
-        rho_value=0.1
-    )
+    if p.N_init_mode == "gaussian":
+        y0 = build_initial_state_2d(
+            grid,
+            N_mode="gaussian", N_positions=dim_p["N_positions"], N_sigmas=dim_p["N_sigmas"], N_amps=dim_p["N_amps"],
+            L_mode="constant", L_amp=dim_p["L_amp"],
+            rho_value=0.1
+        )
+    elif p.N_init_mode == "array":
+        y0 = build_initial_state_2d(
+            grid,
+            N_mode="array", N_scale_range=dim_p.get("N_scale_range", None), N_array=dim_p["N_init_array"],
+            L_mode="constant", L_amp=dim_p["L_amp"],
+            rho_value=0.1
+        )
 
     # Run simulation
     save_ts = jnp.linspace(0, T, n_save_points)  # every ~5 min
