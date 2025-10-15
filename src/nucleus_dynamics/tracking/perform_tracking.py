@@ -8,7 +8,6 @@ from skimage.measure import regionprops
 import napari
 import dask.array as da
 import pandas as pd
-from src.build_killi.build_utils import labels_to_contours_nl
 from tqdm import tqdm
 from scipy.optimize import linear_sum_assignment
 from functools import partial
@@ -16,6 +15,8 @@ from tqdm.contrib.concurrent import process_map
 import multiprocessing
 from dask.diagnostics import ProgressBar
 from zarr.sync import ProcessSynchronizer
+
+from src.segmentation import labels_to_contours_nl
 
 def copy_zarr(frame, src, dst):
     dst[frame] = np.copy(src[frame])
