@@ -1,7 +1,7 @@
 import zarr
 import napari
 from pathlib import Path
-from src.build_killi.run02_segment_nuclei import calculate_li_thresh
+from src.segmentation import calculate_li_thresh
 import numpy as np
 
 # I used this to manually mark the center of the wound in XY
