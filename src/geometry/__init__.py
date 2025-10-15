@@ -1,14 +1,17 @@
-"""Geometry helpers for embryo surface modeling.
+"""Geometry utilities for embryo surface modeling."""
 
-The re-exports below let notebooks and scripts transition to the
-`src.geometry` namespace before the underlying code moves.
-"""
-from src.build_lightsheet.fit_embryo_surface import (
+from .sphere import (
+    create_sphere_mesh,
+    fit_sphere,
+    fit_sphere_with_percentile,
+    fit_spheres_for_well,
+    make_sphere_mesh,
+    sphere_fit_wrapper,
+)
+from .spherical_harmonics import (
     build_sh_basis,
     cart2sph,
     create_sh_mesh,
-    create_sphere_mesh,
-    fit_sphere,
     fit_sphere_and_sh,
     sph2cart,
 )
@@ -20,5 +23,9 @@ __all__ = [
     "create_sphere_mesh",
     "fit_sphere",
     "fit_sphere_and_sh",
+    "fit_sphere_with_percentile",
+    "fit_spheres_for_well",
+    "make_sphere_mesh",
+    "sphere_fit_wrapper",
     "sph2cart",
 ]

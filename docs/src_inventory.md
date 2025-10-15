@@ -35,6 +35,8 @@ src/
         ├── nd2_metadata.py
     ├── geometry/
         ├── __init__.py
+        ├── sphere.py
+        ├── spherical_harmonics.py
     ├── image_utils/
         ├── do_mip_projections.py
     ├── nucleus_dynamics/
@@ -44,8 +46,13 @@ src/
         ├── utilities/
     ├── pipelines/
         ├── __init__.py
+        ├── lightsheet_cli.py
     ├── qc/
         ├── __init__.py
+        ├── mask_qc.py
+        ├── morphology.py
+        ├── shadows.py
+        ├── volumes.py
     ├── segmentation/
         ├── __init__.py
         ├── cellpose.py
@@ -59,6 +66,7 @@ src/
         ├── filter_tracks.py
     ├── tracking/
         ├── __init__.py
+        ├── workflow.py
     ├── utilities/
         ├── __init__.py
         ├── convert_to_zarr.py
