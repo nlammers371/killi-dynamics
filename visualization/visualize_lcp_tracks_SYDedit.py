@@ -3,7 +3,7 @@ import napari
 import numpy as np
 # from src.build_killi.build_utils import fit_sphere_and_sh, create_sphere_mesh, create_sh_mesh, fuse_images
 import pandas as pd
-# from src.build_killi.run02_segment_nuclei import calculate_li_thresh
+# from src.segmentation import calculate_li_thresh
 import os
 from qtpy.QtWidgets import QWidget, QVBoxLayout, QLabel, QLineEdit, QPushButton
 from napari.qt.threading import thread_worker

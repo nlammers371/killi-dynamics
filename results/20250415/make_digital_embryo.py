@@ -7,7 +7,7 @@ import imageio.v3 as iio
 from tqdm import tqdm
 import re
 import pandas as pd
-from src.build_killi.fit_embryo_surface import create_sphere_mesh
+from src.geometry import create_sphere_mesh
 from qtpy.QtWidgets import QApplication
 from napari_animation import Animation
 
