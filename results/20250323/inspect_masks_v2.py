@@ -1,7 +1,7 @@
 import zarr
 import napari
 import numpy as np
-from src.build_killi.run02_segment_nuclei import calculate_li_thresh
+from src.segmentation import calculate_li_thresh
 import pandas as pd
 import statsmodels.api as sm
 import os
