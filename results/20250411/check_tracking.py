@@ -1,4 +1,4 @@
-from src.tracking import perform_tracking, check_tracking
+from src.nucleus_dynamics.tracking.perform_tracking import perform_tracking, check_tracking
 import napari
 import numpy as np
 

@@ -1,4 +1,4 @@
-from src.segmentation import segment_nuclei
+from src.build_killi.run02_segment_nuclei import segment_nuclei
 from multiprocessing import freeze_support
 
 

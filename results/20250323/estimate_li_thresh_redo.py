@@ -1,4 +1,4 @@
-from src.segmentation import segment_nuclei, estimate_li_thresh, calculate_li_trend
+from src.build_killi.run02_segment_nuclei import segment_nuclei, estimate_li_thresh, calculate_li_trend
 
 
 if __name__ == '__main__':
