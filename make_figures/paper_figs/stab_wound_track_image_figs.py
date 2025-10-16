@@ -169,8 +169,8 @@ else:
 #     rgb=False,
 # )
 
-ch0 = image_da[:, 0, :, :]
-ch1 = image_da[:, 1, :, :]
+ch0 = image_da[:, 0, :, ::-1]
+ch1 = image_da[:, 1, :, ::-1]
 
 
 layer1 = viewer.add_image(ch1, colormap="gray" + nls_suffix, opacity=0.9, blending="translucent_no_depth",
@@ -191,6 +191,7 @@ props = {
     "v_rad_smooth": tracks_df["v_rad_smooth"].to_numpy(),
 }
 
+tracks_df["x"] = (ch0.shape[-1] - 1)*scale_vec[-1] - tracks_df["x"]
 if not USE_MIP:
     fields = ["track_id", "t", "z", "y", "x"]
     scale = (1, 1, 1)
@@ -246,6 +247,7 @@ if HEADLESS:
     for i, t in enumerate(tqdm(range(0, n_frames, stride), "Exporting frames...")):
         viewer.dims.set_current_step(0, t)
         arr = viewer.screenshot(canvas_only=True, scale=scale_factor)
+
         font = ImageFont.truetype("arial.ttf", 24)
         img = Image.fromarray(arr)
         draw = ImageDraw.Draw(img)

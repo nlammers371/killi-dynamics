@@ -6,7 +6,7 @@ import pandas as pd
 from tqdm import tqdm
 import scipy.ndimage as ndi
 from skimage.registration import phase_cross_correlation
-from src.build_killi.process_masks import fit_sphere
+from src.geometry import fit_sphere
 
 import os
 os.environ["QT_API"] = "pyqt5"

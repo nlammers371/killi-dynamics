@@ -1,7 +1,7 @@
-from src.build_killi.process_masks import mask_qc_wrapper
+from src.qc import mask_qc_wrapper
 from src.build_killi.fuse_masks import fuse_wrapper
 from multiprocessing import freeze_support
-from src.nucleus_dynamics.tracking.perform_tracking import perform_tracking
+from src.tracking import perform_tracking
 
 
 if __name__ == '__main__':

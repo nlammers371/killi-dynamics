@@ -1,4 +1,4 @@
-from src.build_killi.process_masks import mask_qc_wrapper
+from src.qc import mask_qc_wrapper
 from multiprocessing import freeze_support
 
 
