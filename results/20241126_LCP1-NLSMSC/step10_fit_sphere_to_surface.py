@@ -2,7 +2,7 @@ import napari
 import pandas as pd
 import numpy as np
 import os
-from src.build_killi.fit_embryo_surface import fit_sphere_and_sh, create_sphere_mesh, create_sh_mesh, fit_sphere
+from src.geometry import fit_sphere_and_sh, create_sphere_mesh, create_sh_mesh, fit_sphere
 import zarr
 from tqdm import tqdm
 from skimage.measure import regionprops

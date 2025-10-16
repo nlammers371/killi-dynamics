@@ -8,7 +8,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]   # adjust “2” if levels dif
 sys.path.insert(0, str(REPO_ROOT))
 
 import multiprocessing
-from src.nucleus_dynamics.export_to_zarr.export_nd2_to_zarr import export_nd2_to_zarr
+from src.data_io.nd2_export import export_nd2_to_zarr
 
 
 def main():
