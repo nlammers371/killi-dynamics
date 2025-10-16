@@ -10,17 +10,17 @@ import numpy as np
 
 if __name__ == "__main__":
 
-    project_name = "20250621"
+    project_name = "20250731"
     model_name = "tdTom-bright-log-v5"
     zarr_path = Path(f"/media/nick/cluster/projects/data/killi_tracker/built_data/zarr_image_files/{project_name}/")
     mask_path = Path(f"/media/nick/cluster/projects/data/killi_tracker/built_data/mask_stacks/{model_name}/{project_name}/")
-    # prob_path = Path(
-    #     f"/media/nick/cluster/projects/data/killi_tracker/built_data/cellpose_output/{model_name}/{project_name}/")
+    prob_path = Path(
+        f"/media/nick/cluster/projects/data/killi_tracker/built_data/cellpose_output/{model_name}/{project_name}/")
     # image_list = sorted(list(zarr_path.glob("*.zarr")))
     # image_list = [im for im in image_list if "_z.zarr" not in str(im)]
-    t_ind = 20
-    well_ind = 15
-    ch_ind = 1
+    t_ind = 55
+    well_ind = 4
+    ch_ind = 0
     R_um = 550
     n_phi = 360
     n_theta = 180
@@ -28,9 +28,9 @@ if __name__ == "__main__":
 
     im_zarr = zarr.open(zarr_path / f"{project_name}_well{well_ind:04}.zarr", mode='r')
     mask_zarr = zarr.open(mask_path  / f"{project_name}_well{well_ind:04}_mask_aff.zarr", mode='r')
-    # prob_zarr = zarr.open(prob_path / f"{project_name}_well{well_ind:04}_probs.zarr", mode='r')
+    prob_zarr = zarr.open(prob_path / f"{project_name}_well{well_ind:04}_probs.zarr", mode='r')
     im_plot = np.squeeze(im_zarr[ch_ind, t_ind])
-    # prob_plot = np.squeeze(prob_zarr[t_ind])
+    prob_plot = np.squeeze(prob_zarr[t_ind])
     mask_plot = np.squeeze(mask_zarr[t_ind])
     scale_vec = np.array(im_zarr.attrs['voxel_size_um'])
 
@@ -81,7 +81,7 @@ if __name__ == "__main__":
     print(center_fit)
     viewer = napari.Viewer()
     viewer.add_image(im_plot, scale=scale_vec)
-
+    viewer.add_image(prob_plot, scale=scale_vec)
     viewer.add_labels(inner_mask, name='inner_mask', scale=scale_vec)
     viewer.add_labels(mask_plot, scale=scale_vec)
 

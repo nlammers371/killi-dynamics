@@ -194,7 +194,7 @@ def plot_healpix_equalarea_from_frame(
 def get_intensity_bounds_from_last_frame(zarr_path, channel=0,
                                          values_key="max",
                                          smooth_fwhm_deg=None,
-                                         pct=(1, 99.5)):
+                                         pct=(1, 97.5)):
     g = zarr.open_group(str(zarr_path), mode="r")
     vals = g[values_key]
     if vals.ndim == 3:

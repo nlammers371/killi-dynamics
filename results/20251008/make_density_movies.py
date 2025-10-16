@@ -6,7 +6,7 @@ if __name__ == '__main__':
 
     root = Path("/media/nick/cluster/projects/data/killi_tracker/")
     project_list = ["20250716", "20250731"]
-    well_list = [None, None, None]
+    well_list = [[0], None, None]
     channel = [1, 1, 0]
     dt_vec = [73/60, 68/60]
     dt_target = 0.75

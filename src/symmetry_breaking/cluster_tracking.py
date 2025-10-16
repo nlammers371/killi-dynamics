@@ -5,6 +5,42 @@ from typing import Dict, List, Tuple, Any, Optional
 
 # ---------- (unchanged) projection & graph helpers ----------
 
+# def _spherical_overlap(uA, uB, nside=128):
+#     import healpy as hp
+#     pixA = hp.ang2pix(nside, np.arccos(uA[:,2]), np.arctan2(uA[:,1], uA[:,0]))
+#     pixB = hp.ang2pix(nside, np.arccos(uB[:,2]), np.arctan2(uB[:,1], uB[:,0]))
+#     setA, setB = set(pixA.tolist()), set(pixB.tolist())
+#     inter = len(setA & setB)
+#     if inter == 0: return 0.0
+#     return inter / min(len(setA), len(setB))
+
+
+def _spherical_overlap_iomin(uA, uB, tol_rad):
+    """
+    Overlap = min( |A∩B|/|A| , |A∩B|/|B| ), approximated via angular proximity.
+    uA,uB: (N,3)/(M,3) unit vectors; tol_rad: angular tolerance [radians]
+    """
+    NA, NB = len(uA), len(uB)
+    if NA == 0 or NB == 0:
+        return 0.0
+
+    chord = 2.0 * np.sin(tol_rad / 2.0)
+
+    treeA, treeB = cKDTree(uA), cKDTree(uB)
+
+    # A points close to any B
+    hitA = np.fromiter((len(x) > 0 for x in treeB.query_ball_point(uA, r=chord)),
+                       dtype=bool, count=NA)
+    # B points close to any A
+    hitB = np.fromiter((len(x) > 0 for x in treeA.query_ball_point(uB, r=chord)),
+                       dtype=bool, count=NB)
+
+    covA = hitA.sum() / NA  # fraction of A covered by B
+    covB = hitB.sum() / NB  # fraction of B covered by A
+    return float(min(covA, covB))
+
+
+
 def _project_to_sphere(pts, center, r):
     v = pts - center
     n = np.linalg.norm(v, axis=1)
@@ -44,14 +80,14 @@ def _connected_components_from_neighbors(neigh, min_size=1):
 
 # ---------- per-timepoint stats (adds centroid_u, fluo_mean, deg_mean, nn_dist_mean) ----------
 
-def _cluster_stats_for_time(t_val, df_t, labels, comps, u, r,
+def _cluster_stats_for_time(t_val, df_t, comps, u, r, d_thresh,
                             deg, mean_nn_dist, fluo_vals):
+
     recs = []
     ids = df_t.index.to_numpy()
     for cid, nodes in enumerate(comps):
         row_idx = ids[nodes]
         size = len(nodes)
-
         # centroid direction (unit vector on sphere)
         m = u[nodes].mean(axis=0)
         m = m / (np.linalg.norm(m) + 1e-12)
@@ -68,6 +104,8 @@ def _cluster_stats_for_time(t_val, df_t, labels, comps, u, r,
         nn_dist_mean = float(np.nanmean(mean_nn_dist[nodes])) if size else np.nan
 
         recs.append({
+            "r": r,
+            "d_thresh": d_thresh,
             "t": t_val,
             "cluster_id_local": cid,
             "size": size,
@@ -78,7 +116,8 @@ def _cluster_stats_for_time(t_val, df_t, labels, comps, u, r,
             "deg_mean": deg_mean,
             "nn_dist_mean": nn_dist_mean,
             "member_index": row_idx,
-            "member_track_id": df_t.loc[row_idx, "track_id"].to_numpy(),
+            "member_positions": u,
+            # "member_track_id": df_t.loc[row_idx, "track_id"].to_numpy(),
             "centroid_u": m,   # NEW: unit-vector centroid for gating
         })
     return recs
@@ -126,7 +165,7 @@ def find_clusters_per_timepoint(
         labels, comps = _connected_components_from_neighbors(neigh, min_size=min_size)
         fluo_vals = df_t[fluo_col].to_numpy(dtype=float) if fluo_col in df_t.columns else np.full(len(df_t), np.nan)
 
-        recs = _cluster_stats_for_time(t_val, df_t, labels, comps, u, r,
+        recs = _cluster_stats_for_time(t_val, df_t, comps, u, r, d_thresh,
                                        deg, mean_nn_dist, fluo_vals)
         clusters_by_t[t_val] = recs
 
@@ -195,6 +234,7 @@ def _set_sim(prev_members, curr_members, metric: str):
     else:
         raise ValueError("metric must be 'overlap' or 'jaccard'")
 
+
 def _feat_cos(a_row, b_row, **wkwargs):
     av = _feat_vec(a_row, **wkwargs)
     bv = _feat_vec(b_row, **wkwargs)
@@ -206,6 +246,7 @@ def _feat_cos(a_row, b_row, **wkwargs):
     if na == 0 or nb == 0:
         return 0.0
     return float(np.dot(av, bv) / (na * nb))
+
 def track_clusters_over_time(
     clusters_by_t: Dict[Any, List[dict]],
     link_metric: str = "overlap",   # "overlap" or "jaccard"
@@ -264,7 +305,11 @@ def track_clusters_over_time(
                     ang = _centroid_angle(pa["centroid_u"], cb["centroid_u"])
                     if ang > max_centroid_angle:
                         continue
-                set_sim = _set_sim(pa["member_track_id"], cb["member_track_id"], link_metric)
+                if "member_track_id" not in pa or "member_track_id" not in cb:
+                    theta = cb["d_thresh"] / (0.5*cb["r"] + 0.5*pa["r"])
+                    set_sim = _spherical_overlap_iomin(pa["member_positions"], cb["member_positions"], tol_rad=theta)
+                else:
+                    set_sim = _set_sim(pa["member_track_id"], cb["member_track_id"], link_metric)
                 if set_sim < sim_min:
                     continue
                 feat = _feat_cos(pa, cb)
@@ -408,7 +453,7 @@ def stitch_tracklets(
     def boundary_set_sim(a_rows: pd.DataFrame, b_rows: pd.DataFrame) -> float:
         # choose metric
         simfun = _overlap_coeff if link_metric == "overlap" else _jaccard
-        a_times = a_rows["t"].to_numpy();
+        a_times = a_rows["t"].to_numpy()
         b_times = b_rows["t"].to_numpy()
         # target endpoints
         a_end = a_times.max()
