@@ -206,6 +206,7 @@ def _feat_cos(a_row, b_row, **wkwargs):
     if na == 0 or nb == 0:
         return 0.0
     return float(np.dot(av, bv) / (na * nb))
+
 def track_clusters_over_time(
     clusters_by_t: Dict[Any, List[dict]],
     link_metric: str = "overlap",   # "overlap" or "jaccard"

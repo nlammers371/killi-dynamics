@@ -12,13 +12,13 @@ import numpy as np
 
 # set read/write paths
 # root = "/media/nick/hdd02/Cole Trapnell's Lab Dropbox/Nick Lammers/Nick/pecfin_dynamics/"
-# root = "/media/nick/cluster/projects/data/killi_tracker/"
-root = "/net/trapnell/vol1/home/nlammers/projects/data/killi_tracker/"
-experiment_date_vec = ["20250716"]
+root = "/media/nick/cluster/projects/data/killi_tracker/"
+# root = "/net/trapnell/vol1/home/nlammers/projects/data/killi_tracker/"
+experiment_date_vec = ["20250731"]
 pretrained_model_vec = ["tdTom-bright-log-v5"]  #[pretrained_model0, pretrained_model1, pretrained_model1, pretrained_model0, pretrained_model0]
 overwrite = True
-prob_thresh_range = np.arange(0.5, 6, 3)
-well_range = np.arange(0, 12)
+prob_thresh_range = np.linspace(0.5, 6, 3)
+well_range = np.arange(0, 9)
 seg_res = 1.3  # segmentation resolution in microns
 
 for e, experiment_date in enumerate(experiment_date_vec):
