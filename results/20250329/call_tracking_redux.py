@@ -1,4 +1,4 @@
-from src.nucleus_dynamics.tracking.perform_tracking import perform_tracking
+from src.tracking import perform_tracking
 
 
 if __name__ == "__main__":

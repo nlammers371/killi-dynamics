@@ -7,14 +7,15 @@ from skimage.measure import regionprops, regionprops_table
 import napari
 import dask.array as da
 import pandas as pd
-from src.build_killi.build_utils import labels_to_contours_nl
 from tqdm import tqdm
 from scipy.optimize import linear_sum_assignment
 from functools import partial
 from tqdm.contrib.concurrent import process_map
 import multiprocessing
 from dask.diagnostics import ProgressBar
-from src.nucleus_dynamics.tracking.perform_tracking import reindex_mask
+
+from src.segmentation import labels_to_contours_nl
+from src.tracking import reindex_mask
 
 def props_integrate(frame, mask_zarr, im_zarr, fluo_channel, tracks_df, start_i, scale_vec):
 

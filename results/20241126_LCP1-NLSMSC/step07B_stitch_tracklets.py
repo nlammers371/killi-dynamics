@@ -3,7 +3,7 @@ import numpy as np
 import os
 from ultrack.tracks.gap_closing import close_tracks_gaps
 from tqdm import tqdm
-from src.nucleus_dynamics.tracking.perform_tracking import reindex_mask, copy_zarr
+from src.tracking import reindex_mask, copy_zarr
 import zarr
 from functools import partial
 from tqdm.contrib.concurrent import process_map
