@@ -21,8 +21,6 @@ from scipy.ndimage import mean as ndi_mean
 from src.geometry import (
     create_sh_mesh,
     create_sphere_mesh,
-    fit_sphere,
-    fit_sphere_and_sh,
 )
 
 
@@ -633,30 +631,6 @@ def integrate_fluorescence_wrapper(root, project_name, fluo_channel, fused_flag=
 
     return True
 
-def sh_mask_filter(mask, scale_vec, L_max=15, mesh_res=100, max_surf_dist=30, area_thresh=500):
-
-    # get mask locations
-    props = regionprops(mask, spacing=scale_vec)
-    points = np.array([prop.centroid for prop in props])
-    label_vec = np.array([prop.label for prop in props])
-    area_vec = np.array([prop.area for prop in props])
-
-    # fit sphere and get SH info
-    coeffs, fitted_center, fitted_radius = fit_sphere_and_sh(points, L_max=L_max)
-    sphere_mesh = create_sphere_mesh(fitted_center, fitted_radius, resolution=mesh_res)
-
-    # get sh mesh
-    sh_mesh, r_sh = create_sh_mesh(coeffs, sphere_mesh)
-
-    # get distances
-    surf_dist_mat = distance_matrix(points, sh_mesh[0])
-    surf_dist_vec = np.min(surf_dist_mat, axis=1)
-
-    outlier_filter = (surf_dist_vec > max_surf_dist) & (area_vec < area_thresh)
-    outlier_labels = label_vec[outlier_filter]  # threshold for outliers
-    inlier_mask = label(~np.isin(mask, outlier_labels) & (mask > 0))  # create mask for outliers
-
-    return inlier_mask
 
 def label_fun(t, write_indices, labels, foreground, contours, shape, last_filter_start_i, scale_vec, sigma=None):
 

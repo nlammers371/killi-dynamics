@@ -8,10 +8,14 @@ from tqdm.contrib.concurrent import process_map
 from functools import partial
 import zarr
 import re
+# from bioio import BioImage
+from pathlib import Path
+import dask
+import numpy as np
+import zarr
 from bioio import BioImage
 from pathlib import Path
-
-import dask
+from typing import List, Optional, Tuple
 
 
 _CHUNK_KEY_RE = re.compile(r'^(\d+)\..*$')  # capture leading time index
@@ -36,12 +40,6 @@ def get_prefix_list(raw_data_root):
     prefix_list = [p for p in prefix_list if p != ""]
     return prefix_list
 
-
-import numpy as np
-import zarr
-from bioio import BioImage
-from pathlib import Path
-from typing import List, Optional, Tuple
 
 
 def initialize_zarr_store(

@@ -65,7 +65,12 @@ def segment_nuclei_thresh(
         last_i = image_zarr.shape[0]
 
     mask_store_path = out_directory / f"{project_name}_masks.zarr"
-    mask_store = zarr.open(mask_store_path.as_posix(), mode="a")
+    mode = "a" if not overwrite else "w"
+    mask_store = zarr.open(mask_store_path.as_posix(), mode=mode)
+
+    # transfer all metadata from image_zarr to mask store
+    for meta_key in image_zarr.attrs.keys():
+        mask_store.attrs[meta_key] = image_zarr.attrs[meta_key]
 
     if multichannel_flag:
         dim_shape = image_zarr.shape[2:]

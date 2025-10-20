@@ -14,23 +14,10 @@ zarr_path = Path(data_root) / "built_data" / "zarr_image_files"/ f"{project_name
 im = zarr.open(zarr_path, mode='r')
 ch = 1
 plot_frame = 30
-scale_vec = tuple(im.attrs['pixel_size_um'])  # (z, y, x) spacing in microns
+scale_vec = tuple(im.attrs['voxel_size_um'])  # (z, y, x) spacing in microns
 im_plot = np.squeeze(im[plot_frame, ch])   # Assuming channel 0 is the nuclear channel
 # mask_plot = np.squeeze(mask_zarr[22])
 print("Calculating LoG...")
-# gauss_sigma = (1.33, 4, 4)
-# gaussian_background = ski.filters.gaussian(im_plot, sigma=gauss_sigma, preserve_range=True)
-# data_bkg = im_plot - gaussian_background
-#
-# data_log = sitk.GetArrayFromImage(
-#     sitk.LaplacianRecursiveGaussian(sitk.GetImageFromArray(data_bkg), sigma=1)
-# )
-# data_log_i = ski.util.invert(data_log)
-#
-# print("Calculating markers...")
-# h = 0.02 * data_log_i.max()  # adjust scale
-# markers = morphology.h_maxima(data_log_i, h)
-# markers = ndi.label(markers)[0]
 
 viewer = napari.Viewer()
 # viewer.add_image(im_LoG, scale=scale_vec)
