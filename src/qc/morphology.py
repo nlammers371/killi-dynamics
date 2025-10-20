@@ -9,8 +9,11 @@ from skimage.measure import regionprops
 
 def ellipsoid_axis_lengths(central_moments: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """Compute semi-axis lengths of ellipsoids defined by central moments."""
+    if  central_moments.shape[1:] == (4, 4, 4):
+        central_moments = central_moments[:, :3, :3, :3]
     if central_moments.ndim != 4 or central_moments.shape[1:] != (3, 3, 3):
         raise ValueError("central_moments must have shape (N, 3, 3, 3)")
+        # return np.array([np.inf, 0, 0]), np.array([])
 
     m0 = central_moments[:, 0, 0, 0]
     sxx = central_moments[:, 2, 0, 0] / m0

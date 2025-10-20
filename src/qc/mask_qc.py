@@ -5,7 +5,7 @@ import multiprocessing
 import os
 from functools import partial
 from typing import Dict, Iterable, Mapping, Sequence
-
+from pathlib import Path
 import numpy as np
 import zarr
 from filelock import FileLock
@@ -49,17 +49,20 @@ def persist_keep_labels(zarr_path: str, frame: int, keep_labels: Sequence[int]) 
         group.attrs["mask_keep_ids"] = meta
 
 
+# ---------------------------------------------------------------------
+# 2. Perform QC for a single frame and write clean mask
+# ---------------------------------------------------------------------
 def perform_mask_qc(
     t_int: int,
     mask_in: Mapping[int, np.ndarray],
-    zarr_path: str,
+    clean_zarr: zarr.Array,
     scale_vec: Iterable[float],
     min_nucleus_vol: float,
     z_prox_thresh: float,
     max_eccentricity: float,
     min_overlap: float,
 ) -> np.ndarray:
-    """Run QC for a single time point and persist keep labels."""
+    """Run QC for a single time point and write cleaned mask to Zarr."""
     mask = np.asarray(mask_in[t_int]).squeeze()
     keep_labels = compute_qc_keep_labels(
         mask=mask,
@@ -69,47 +72,83 @@ def perform_mask_qc(
         max_eccentricity=max_eccentricity,
         min_overlap=min_overlap,
     )
-    persist_keep_labels(zarr_path, t_int, keep_labels)
+
+    if keep_labels.size == 0:
+        clean_zarr[t_int] = np.zeros_like(mask, dtype=np.uint16)
+    else:
+        # keep only good labels
+        clean_mask = np.isin(mask, keep_labels) * mask
+        clean_zarr[t_int] = clean_mask.astype(np.uint16)
+
     return keep_labels
 
-
+# ---------------------------------------------------------------------
+# 3. Wrapper for full QC pipeline
+# ---------------------------------------------------------------------
 def mask_qc_wrapper(
-    root: str,
+    root: Path | str,
     project: str,
+    mask_type: str = "li_segmentation",
     min_nucleus_vol: float = 75.0,
     z_prox_thresh: float = -30.0,
     max_eccentricity: float = 4.5,
     min_shadow_overlap: float = 0.35,
     last_i: int | None = None,
     overwrite: bool = False,
-    par_flag: bool = False,
-    n_workers: int | None = None,
+    n_workers: int = 1,
 ) -> Dict[int, np.ndarray]:
-    """Process all frames of the fused mask Zarr and record keep labels."""
-    mask_path = os.path.join(root, "built_data", "mask_stacks", f"{project}_mask_aff.zarr")
+    """Process all frames of the fused mask Zarr and create a clean sub-dataset."""
+    root = Path(root)
+    mask_path = root / "built_data" / "mask_stacks" / mask_type / f"{project}_masks.zarr"
     mask_store = zarr.open(mask_path, mode="a")
 
+    # choose source mask (e.g., 'aff')
+    mask_in = mask_store["stitched"]
     if last_i is None:
-        last_i = mask_store.shape[0]
+        last_i = mask_in.shape[0]
 
-    if n_workers is None:
-        total_cpus = multiprocessing.cpu_count()
-        n_workers = max(1, total_cpus // 2)
-
+    par_flag = n_workers is not None and n_workers > 1
     scale_vec = (
-        mask_store.attrs["PhysicalSizeZ"],
-        mask_store.attrs["PhysicalSizeY"],
-        mask_store.attrs["PhysicalSizeX"],
+        mask_store["stitched"].attrs.get("voxel_size_um")
+        or mask_store["stitched"].attrs.get("pixel_size_um")
     )
+    if scale_vec is None:
+        raise KeyError("Missing 'voxel_size_um' or 'pixel_size_um' in attrs.")
 
+    # ---------------------------------------------------------
+    # Create or reset "clean" dataset
+    # ---------------------------------------------------------
+    if "clean" in mask_store:
+        if overwrite:
+            del mask_store["clean"]
+        else:
+            clean_zarr = mask_store["clean"]
+    if "clean" not in mask_store:
+        clean_zarr = mask_store.create_dataset(
+            "clean",
+            shape=mask_in.shape,
+            dtype=np.uint16,
+            chunks=mask_in.chunks,
+        )
+
+    # ---------------------------------------------------------
+    # Indices to process
+    # ---------------------------------------------------------
     all_indices = set(range(last_i))
-    existing = set(map(int, mask_store.attrs.get("mask_keep_ids", {}).keys()))
+    existing = (
+        set(np.nonzero([np.any(mask_store["clean"][i]) for i in range(last_i)])[0])
+        if "clean" in mask_store and not overwrite
+        else set()
+    )
     write_indices = sorted(all_indices if overwrite else (all_indices - existing))
 
+    # ---------------------------------------------------------
+    # Parallel/serial QC
+    # ---------------------------------------------------------
     run = partial(
         perform_mask_qc,
-        mask_in=mask_store,
-        zarr_path=mask_path,
+        mask_in=mask_in,
+        clean_zarr=clean_zarr,
         scale_vec=scale_vec,
         min_nucleus_vol=min_nucleus_vol,
         z_prox_thresh=z_prox_thresh,
@@ -125,4 +164,5 @@ def mask_qc_wrapper(
         else:
             for idx in tqdm(write_indices, desc="Mask QC"):
                 results[int(idx)] = run(idx)
+
     return results

@@ -1,4 +1,4 @@
-from src.symmetry_breaking.build_nucleus_data import build_nucleus_df_wrapper
+from src.calculate_cell_fields.build_nucleus_data import build_nucleus_df_wrapper
 from pathlib import Path
 
 

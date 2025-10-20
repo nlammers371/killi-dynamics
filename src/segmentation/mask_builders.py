@@ -9,7 +9,7 @@ from skimage.morphology import label
 from skimage import morphology
 from skimage.segmentation import watershed
 
-from src.segmentation.thresholding import calculate_li_thresh
+from src.segmentation.li_thresholding import calculate_li_thresh
 
 
 def do_hierarchical_watershed(
@@ -72,15 +72,14 @@ def perform_li_segmentation(
     image_zarr,
     nuclear_channel: int,
     multichannel_flag: bool,
-    stack_zarr,
-    aff_zarr,
+    mask_zarr,
     preproc_flag: bool = True,
     n_thresh: int = 5,
     thresh_factors: Sequence[float] | None = None,
 ):
     """Segment a single timepoint using Li-threshold sweeping."""
     if thresh_factors is None:
-        thresh_factors = [0.75, 1.25]
+        thresh_factors = [0.9, 1, 1.1] # conservative range unless otherwise specified
 
     li_thresh = li_df.loc[time_int, "li_thresh"]
     if multichannel_flag:
@@ -98,16 +97,16 @@ def perform_li_segmentation(
         thresh_range = np.linspace(thresh_li * thresh_factors[0], thresh_factors[1] * thresh_li, n_thresh)
         aff_mask, mask_stack = do_hierarchical_watershed(data_log_i, thresh_range=thresh_range)
 
-        stack_zarr[time_int] = mask_stack
-        aff_zarr[time_int] = aff_mask
+        mask_zarr["thresh_stack"][time_int] = mask_stack
+        mask_zarr["stitched"][time_int] = aff_mask
 
-        mms = stack_zarr.attrs["thresh_levels"]
+        mms = mask_zarr["thresh_stack"].attrs["thresh_levels"]
         mms[int(time_int)] = list(thresh_range)
-        stack_zarr.attrs["thresh_levels"] = {str(k): v for k, v in mms.items()}
+        mask_zarr["thresh_stack"].attrs["thresh_levels"] = {str(k): v for k, v in mms.items()}
 
-        ams = aff_zarr.attrs["thresh_levels"]
+        ams = mask_zarr["stitched"].attrs["thresh_levels"]
         ams[int(time_int)] = list(thresh_range)
-        aff_zarr.attrs["thresh_levels"] = {str(k): v for k, v in ams.items()}
+        mask_zarr["stitched"].attrs["thresh_levels"] = {str(k): v for k, v in ams.items()}
 
         return 1
 
