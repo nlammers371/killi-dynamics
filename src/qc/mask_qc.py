@@ -15,39 +15,40 @@ from tqdm.contrib.concurrent import process_map
 from .morphology import filter_by_eccentricity
 from .shadows import filter_shadowed_labels
 from .volumes import filter_by_minimum_volume
+from .surf import filter_by_surf_distance
 
 
-def compute_qc_keep_labels(
-    mask: np.ndarray,
-    scale_vec: Sequence[float],
-    min_nucleus_vol: float,
-    z_prox_thresh: float,
-    max_eccentricity: float,
-    min_overlap: float,
-    min_minor_radius: float = 2.0,
-) -> np.ndarray:
-    """Return the labels that survive volume, shadow, and morphology filters."""
-    filtered, keep = filter_by_minimum_volume(mask, scale_vec, min_nucleus_vol)
-    if keep.size == 0:
-        return np.array([], dtype=np.int32)
-
-    filtered, keep = filter_shadowed_labels(filtered, scale_vec, z_prox_thresh, min_overlap)
-    if keep.size == 0:
-        return np.array([], dtype=np.int32)
-
-    filtered, keep = filter_by_eccentricity(filtered, scale_vec, max_eccentricity, min_minor_radius)
-    return keep
-
-
-def persist_keep_labels(zarr_path: str, frame: int, keep_labels: Sequence[int]) -> None:
-    """Store keep labels for ``frame`` inside ``mask_keep_ids`` attribute."""
-    lock = FileLock(f"{zarr_path}.lock")
-    with lock:
-        group = zarr.open(zarr_path, mode="a")
-        meta = dict(group.attrs.get("mask_keep_ids", {}))
-        meta[str(int(frame))] = list(map(int, keep_labels))
-        group.attrs["mask_keep_ids"] = meta
-
+# def compute_qc_keep_labels(
+#     mask: np.ndarray,
+#     scale_vec: Sequence[float],
+#     min_nucleus_vol: float,
+#     z_prox_thresh: float,
+#     max_eccentricity: float,
+#     min_overlap: float,
+#     max_surf_dist: float = 50.0,
+# ) -> np.ndarray:
+#
+#     """Return the labels that survive volume, shadow, and morphology filters."""
+#
+#     # Volume-based filter
+#     filtered, keep = filter_by_minimum_volume(mask, scale_vec, min_nucleus_vol)
+#     if keep.size == 0:
+#         return np.array([], dtype=np.int32)
+#
+#     # Refraction "shadow" filter
+#     filtered, keep = filter_shadowed_labels(filtered, scale_vec, z_prox_thresh, min_overlap)
+#     if keep.size == 0:
+#         return np.array([], dtype=np.int32)
+#
+#     # Filter out extreme shape outliers
+#     filtered, keep = filter_by_eccentricity(filtered, scale_vec, max_eccentricity)
+#
+#     # Filter by distance from spherical surface
+#     filtered, keep = filter_by_surf_distance(filtered, scale_vec, max_surf_dist)
+#
+#     # TO DO: add refined SH-based surface distance filter
+#
+#     return keep
 
 # ---------------------------------------------------------------------
 # 2. Perform QC for a single frame and write clean mask
@@ -60,27 +61,37 @@ def perform_mask_qc(
     min_nucleus_vol: float,
     z_prox_thresh: float,
     max_eccentricity: float,
+    max_surf_dist: float,
     min_overlap: float,
 ) -> np.ndarray:
+
     """Run QC for a single time point and write cleaned mask to Zarr."""
     mask = np.asarray(mask_in[t_int]).squeeze()
-    keep_labels = compute_qc_keep_labels(
-        mask=mask,
-        scale_vec=scale_vec,
-        min_nucleus_vol=min_nucleus_vol,
-        z_prox_thresh=z_prox_thresh,
-        max_eccentricity=max_eccentricity,
-        min_overlap=min_overlap,
-    )
 
-    if keep_labels.size == 0:
+    # Volume-based filter
+    filtered, keep = filter_by_minimum_volume(mask, scale_vec, min_nucleus_vol)
+    if keep.size == 0:
+        return np.array([], dtype=np.int32)
+
+    # Refraction "shadow" filter
+    filtered, keep = filter_shadowed_labels(filtered, scale_vec, z_prox_thresh, min_overlap)
+    if keep.size == 0:
+        return np.array([], dtype=np.int32)
+
+    # Filter out extreme shape outliers
+    filtered, keep = filter_by_eccentricity(filtered, scale_vec, max_eccentricity)
+
+    # Filter by distance from spherical surface
+    filtered, keep = filter_by_surf_distance(filtered, scale_vec, max_surf_dist)
+
+    if keep.size == 0:
         clean_zarr[t_int] = np.zeros_like(mask, dtype=np.uint16)
     else:
         # keep only good labels
-        clean_mask = np.isin(mask, keep_labels) * mask
+        clean_mask = np.isin(mask, keep) * mask
         clean_zarr[t_int] = clean_mask.astype(np.uint16)
 
-    return keep_labels
+    return keep
 
 # ---------------------------------------------------------------------
 # 3. Wrapper for full QC pipeline
@@ -89,10 +100,11 @@ def mask_qc_wrapper(
     root: Path | str,
     project: str,
     mask_type: str = "li_segmentation",
-    min_nucleus_vol: float = 75.0,
+    min_nucleus_vol: float = 50.0,
     z_prox_thresh: float = -30.0,
     max_eccentricity: float = 4.5,
     min_shadow_overlap: float = 0.35,
+    max_surf_dist: float = 50.0,
     last_i: int | None = None,
     overwrite: bool = False,
     n_workers: int = 1,
@@ -154,6 +166,7 @@ def mask_qc_wrapper(
         z_prox_thresh=z_prox_thresh,
         max_eccentricity=max_eccentricity,
         min_overlap=min_shadow_overlap,
+        max_surf_dist=max_surf_dist,
     )
 
     results: Dict[int, np.ndarray] = {}

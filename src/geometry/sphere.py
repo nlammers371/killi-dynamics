@@ -13,6 +13,7 @@ from scipy.optimize import least_squares
 from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map
 
+
 def fit_sphere_with_percentile(
     points_phys: np.ndarray,
     im_shape: Sequence[float],
@@ -22,6 +23,7 @@ def fit_sphere_with_percentile(
     max_nfev: int = 1000,
     pct: float = 0.9,
 ) -> tuple[np.ndarray, float, float]:
+
     """Fit a sphere center (and optional radius) to 3D points."""
     pts = np.asarray(points_phys, dtype=float)
     if pts.ndim != 2 or pts.shape[1] != 3:
@@ -57,28 +59,6 @@ def fit_sphere_with_percentile(
     radius_pct = np.quantile(d_all, pct)
     return center_fit, radius_fit, radius_pct
 
-
-def create_sphere_mesh(center: Iterable[float], radius: float, resolution: int = 50):
-    """Return vertices and faces for a sphere surface."""
-    center = np.asarray(center, dtype=float)
-    phi, theta = np.mgrid[0.0:np.pi:complex(0, resolution), 0.0:2.0 * np.pi:complex(0, resolution)]
-    x = center[0] + radius * np.sin(phi) * np.cos(theta)
-    y = center[1] + radius * np.sin(phi) * np.sin(theta)
-    z = center[2] + radius * np.cos(phi)
-    vertices = np.column_stack((x.ravel(), y.ravel(), z.ravel()))
-
-    faces = []
-    for i in range(resolution - 1):
-        for j in range(resolution - 1):
-            idx0 = i * resolution + j
-            idx1 = idx0 + 1
-            idx2 = idx0 + resolution
-            idx3 = idx2 + 1
-            faces.append([idx0, idx2, idx1])
-            faces.append([idx1, idx2, idx3])
-    return vertices, np.array(faces, dtype=np.int32)
-
-
 def make_sphere_mesh(n_phi: int, n_theta: int, center: Iterable[float], radius: float):
     """Compatibility wrapper matching the legacy ``make_sphere_mesh`` signature."""
     center = np.asarray(center, dtype=float)
@@ -102,7 +82,7 @@ def make_sphere_mesh(n_phi: int, n_theta: int, center: Iterable[float], radius: 
     return verts, np.array(faces, dtype=np.int32)
 
 
-def fit_sphere(points: np.ndarray, quantile: float = 0.95):
+def fit_sphere(points: np.ndarray, rad_quantile: float = 0.25):
     """Fit a sphere via least squares and report inner/outer radii."""
     points = np.asarray(points, dtype=float)
     center_init = np.mean(points, axis=0)
@@ -115,9 +95,30 @@ def fit_sphere(points: np.ndarray, quantile: float = 0.95):
     center = result.x
     distances = np.linalg.norm(points - center, axis=1)
     radius = distances.mean()
-    inner_radius = np.quantile(distances, 1 - quantile)
-    outer_radius = np.quantile(distances, quantile)
-    return center, radius, inner_radius, outer_radius
+    inner_radius = np.quantile(distances, rad_quantile)
+    # outer_radius = np.quantile(distances, quantile)
+    return center, radius, inner_radius#, outer_radius
+
+
+def create_sphere_mesh(center: Iterable[float], radius: float, resolution: int = 50):
+    """Return vertices and faces for a sphere surface."""
+    center = np.asarray(center, dtype=float)
+    phi, theta = np.mgrid[0.0:np.pi:complex(0, resolution), 0.0:2.0 * np.pi:complex(0, resolution)]
+    x = center[0] + radius * np.sin(phi) * np.cos(theta)
+    y = center[1] + radius * np.sin(phi) * np.sin(theta)
+    z = center[2] + radius * np.cos(phi)
+    vertices = np.column_stack((x.ravel(), y.ravel(), z.ravel()))
+
+    faces = []
+    for i in range(resolution - 1):
+        for j in range(resolution - 1):
+            idx0 = i * resolution + j
+            idx1 = idx0 + 1
+            idx2 = idx0 + resolution
+            idx3 = idx2 + 1
+            faces.append([idx0, idx2, idx1])
+            faces.append([idx1, idx2, idx3])
+    return vertices, np.array(faces, dtype=np.int32)
 
 
 def fit_spheres_for_well(

@@ -100,13 +100,14 @@ def perform_li_segmentation(
         mask_zarr["thresh_stack"][time_int] = mask_stack
         mask_zarr["stitched"][time_int] = aff_mask
 
-        mms = mask_zarr["thresh_stack"].attrs["thresh_levels"]
-        mms[int(time_int)] = list(thresh_range)
-        mask_zarr["thresh_stack"].attrs["thresh_levels"] = {str(k): v for k, v in mms.items()}
+        # Fetch safely with a default empty dict
+        thresh_levels = dict(mask_zarr.attrs.get("thresh_levels", {}))
 
-        ams = mask_zarr["stitched"].attrs["thresh_levels"]
-        ams[int(time_int)] = list(thresh_range)
-        mask_zarr["stitched"].attrs["thresh_levels"] = {str(k): v for k, v in ams.items()}
+        # Update current timepoint (always stringify keys for JSON compatibility)
+        thresh_levels[str(int(time_int))] = list(map(float, thresh_range))
+
+        # Overwrite full dict back to the root attrs
+        mask_zarr.attrs["thresh_levels"] = thresh_levels
 
         return 1
 

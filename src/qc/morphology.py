@@ -41,7 +41,7 @@ def filter_by_eccentricity(
     mask: np.ndarray,
     scale_vec: Iterable[float],
     max_eccentricity: float,
-    min_minor_radius: float = 0.0,
+    min_minor_radius: float = 2.0,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Remove labels whose ellipsoid fit exceeds ``max_eccentricity``."""
     props = regionprops(mask, spacing=tuple(scale_vec))
