@@ -13,7 +13,6 @@ from scipy.optimize import least_squares
 from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map
 
-
 def fit_sphere_with_percentile(
     points_phys: np.ndarray,
     im_shape: Sequence[float],
@@ -237,3 +236,40 @@ def sphere_fit_wrapper(
             run(w)
     else:
         process_map(run, wells, max_workers=n_jobs, chunksize=1, desc="Fitting spheres")
+
+
+# def project_to_healpix(mask, center, radius, scale_vec,
+#                        nside=64, dist_thresh=50.0):
+#     """
+#     Project a binary mask to a HEALPix sphere (astropy_healpix version).
+#     """
+#     # --- get centroids in physical units ---
+#     props = regionprops_table(mask, spacing=scale_vec,
+#                               properties=("centroid",))
+#     coords = np.column_stack([
+#         props["centroid-0"],
+#         props["centroid-1"],
+#         props["centroid-2"],
+#     ])
+#
+#     # --- restrict to spherical shell ---
+#     dR = np.linalg.norm(coords - center[None, :], axis=1) - radius
+#     shell_mask = np.abs(dR) <= dist_thresh
+#     coords = coords[shell_mask]
+#
+#     # --- spherical angles (colatitude θ, longitude φ) ---
+#     rel = coords - center[None, :]
+#     r = np.linalg.norm(rel, axis=1)
+#     # 0 = north pole, π = south pole
+#     theta = np.arccos(np.clip(rel[:, 2] / r, -1, 1))
+#     # longitude in [0, 2π)
+#     phi = np.mod(np.arctan2(rel[:, 1], rel[:, 0]), 2 * np.pi)
+#
+#     # --- map to HEALPix pixels ---
+#     hp = HEALPix(nside=nside, order="nested")
+#     pix = hp.angle_to_pixel(theta * u.rad, phi * u.rad)
+#
+#     # --- counts per pixel ---
+#     counts = np.bincount(pix, minlength=hp.npix)
+#
+#     return counts
