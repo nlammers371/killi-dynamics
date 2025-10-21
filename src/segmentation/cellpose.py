@@ -20,7 +20,7 @@ from cellpose import models
 from cellpose.core import use_gpu
 from skimage.transform import resize
 
-from src.nucleus_dynamics.utilities.image_utils import calculate_LoG
+from src._Archive.nucleus_dynamics.utilities.image_utils import calculate_LoG
 
 LOGGER = logging.getLogger(__name__)
 

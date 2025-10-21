@@ -7,7 +7,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]   # adjust “2” if levels dif
 # Put that directory at the *front* of sys.path so Python looks there first
 sys.path.insert(0, str(REPO_ROOT))
 
-from src.nucleus_dynamics.build.build02_stitch_nuclear_masks import stitch_cellpose_labels
+from src._Archive.nucleus_dynamics.build.build02_stitch_nuclear_masks import stitch_cellpose_labels
 import numpy as np
 
 # set read/write paths
