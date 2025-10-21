@@ -1,7 +1,6 @@
-from src.data_io.czi_export import export_czi_to_zarr
+from src.data_io._Archive.czi_export import export_czi_to_zarr
 import numpy as np
 from multiprocessing import freeze_support
-
 
 if __name__ == '__main__':
     freeze_support()

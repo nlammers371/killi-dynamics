@@ -1,4 +1,4 @@
-from src.data_io.czi_export import export_czi_to_zarr
+from src.data_io.czi_export import export_czi_to_zarr_v2
 import numpy as np
 from multiprocessing import freeze_support
 
@@ -27,11 +27,11 @@ if __name__ == '__main__':
     for i in range(len(project_name_vec)):
         file_prefix = file_prefix_vec[i]
         project_name = project_name_vec[i]
-        export_czi_to_zarr(raw_data_root=raw_data_root,
+        export_czi_to_zarr_v2(raw_data_root=raw_data_root,
                            file_prefix=file_prefix,
                            project_name=project_name, save_root=save_root,
                            resampling_scale=resampling_scale,
-                           n_workers=8,
+                           n_workers=1,
                            channel_names=channel_names,
                            channels_to_keep=keep_channel_vec,
                            overwrite_flag=overwrite, last_i=last_i)

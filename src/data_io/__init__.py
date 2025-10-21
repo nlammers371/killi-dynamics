@@ -1,14 +1,14 @@
 """Data ingestion utilities for microscopy datasets."""
 
-from src.data_io.czi_export import (
-    export_czi_to_zarr,
+from src.data_io._Archive.czi_export import (
+    # export_czi_to_zarr,
     get_prefix_list,
     initialize_zarr_store,
     write_zarr,
 )
-from src.data_io.czi_export_v2 import (
+from src.data_io.czi_export import (
     SideSpec,
-    export_czi_to_zarr_v2,
+    export_czi_to_zarr,
 )
 from src.data_io.nd2_export import export_nd2_to_zarr, write_to_zarr
 from src.data_io.nd2_metadata import (
@@ -20,12 +20,12 @@ from src.data_io.nd2_metadata import (
 )
 
 __all__ = [
-    "export_czi_to_zarr",
+    # "export_czi_to_zarr",
     "get_prefix_list",
     "initialize_zarr_store",
     "write_zarr",
     "SideSpec",
-    "export_czi_to_zarr_v2",
+    "export_czi_to_zarr",
     "export_nd2_to_zarr",
     "write_to_zarr",
     "extract_frame_metadata",
