@@ -8,10 +8,11 @@ import numpy as np
 import pandas as pd
 import SimpleITK as sitk
 import skimage as ski
-import zarr
 from scipy.interpolate import interp1d
 import statsmodels.api as sm
 from tqdm import tqdm
+
+from src.data_io.zarr_utils import open_experiment_array
 
 def estimate_li_thresh(
     root: Path | str,
@@ -27,12 +28,10 @@ def estimate_li_thresh(
 ):
     """Estimate Li thresholds on a coarse grid for a project."""
     root = Path(root)
-    zarr_path = root / "built_data" / "zarr_image_files" / f"{project_name}.zarr"
-
     out_directory = root / "built_data" / "mask_stacks" / "li_segmentation"
     out_directory.mkdir(exist_ok=True, parents=True)
 
-    image_zarr = zarr.open(zarr_path.as_posix(), mode="r")
+    image_zarr, _store_path, _resolved_side = open_experiment_array(root, project_name)
     channel_list = image_zarr.attrs["channels"]
     multichannel_flag = len(channel_list) > 1
     if nuclear_channel is None:
@@ -164,9 +163,10 @@ def calculate_li_trend(
         li_df = pd.concat([li_df1, li_df2], axis=0, ignore_index=True).sort_values(by="frame")
 
     if last_i is None:
-        zarr_name = f"{project_prefix}.zarr" if not multiside_experiment else f"{project_prefix}_side1.zarr"
-        zarr_path = root / "built_data" / "zarr_image_files" / zarr_name
-        image_store = zarr.open(zarr_path, mode="r")
+        side_hint: Optional[str | Sequence[str]] = None
+        if multiside_experiment:
+            side_hint = ["side1", "side_00", "side0"]
+        image_store, _store_path, _ = open_experiment_array(root, project_prefix, side=side_hint)
         last_i = image_store.shape[0]
 
     x = li_df["frame"].to_numpy()

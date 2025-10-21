@@ -6,6 +6,8 @@ import os
 from skimage.measure import label, regionprops
 from scipy.interpolate import interp1d
 
+from src.data_io.zarr_utils import open_experiment_array
+
 os.environ["QT_API"] = "pyqt5"
 
 # get filepaths
@@ -16,8 +18,7 @@ seg_type = "li_segmentation"
 # mpath = root / "built_data" / "mask_stacks" / (project + "_mask_fused.zarr")
 mpath = root / "built_data" / "mask_stacks" / seg_type / (project + "_masks.zarr")
 mask = zarr.open(mpath, mode="r")
-zpath = root / "built_data" / "zarr_image_files" / f"{project}.zarr"
-im = zarr.open(zpath, mode="r")
+im, _store_path, _resolved_side = open_experiment_array(root, project)
 # zarr2 = zarr.open(zpath2, mode="r")
 
 # generate frame indices

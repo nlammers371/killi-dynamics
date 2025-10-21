@@ -1,11 +1,13 @@
 import numpy as np
-import zarr
 import os
-from skimage.registration import phase_cross_correlation
-import pandas as pd
-from tqdm.contrib.concurrent import process_map
 from functools import partial
 import multiprocessing
+
+import pandas as pd
+from skimage.registration import phase_cross_correlation
+from tqdm.contrib.concurrent import process_map
+
+from src.data_io.zarr_utils import open_experiment_array
 
 def align_halves(t, image_data1, image_data2, z_align_size=50, nucleus_channel=1):
 
@@ -46,12 +48,8 @@ def get_hemisphere_shifts(root, side1_name, side2_name, interval=25, nucleus_cha
         # Limit to 25% of CPUs (rounded down, at least 1)
         n_workers = max(1, total_cpus // 4)
 
-    # load zarr files
-    side1_path = os.path.join(root, "built_data", "zarr_image_files", side1_name + ".zarr")
-    side2_path = os.path.join(root, "built_data", "zarr_image_files", side2_name + ".zarr")
-
-    image_data1 = zarr.open(side1_path, mode="r")
-    image_data2 = zarr.open(side2_path, mode="r")
+    image_data1, _store_path1, _group1 = open_experiment_array(root, side1_name, side=side1_name)
+    image_data2, _store_path2, _group2 = open_experiment_array(root, side2_name, side=side2_name)
 
     if last_i is None:
         last_i = np.min([image_data1.shape[0], image_data2.shape[0]]) - 1
