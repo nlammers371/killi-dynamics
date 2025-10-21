@@ -3,7 +3,7 @@ import os
 import numpy as np
 from tqdm import tqdm
 from skimage.transform import resize
-from src.utilities.image_utils import remove_background
+from src._Archive.utilities.image_utils import remove_background
 import zarr
 
 

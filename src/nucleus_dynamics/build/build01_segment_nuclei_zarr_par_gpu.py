@@ -4,7 +4,6 @@ Image segmentation via Cellpose library
 import logging
 import glob2 as glob
 import os
-import time
 # import pyclesperanto as cle
 from typing import Any
 from typing import Dict
@@ -16,9 +15,10 @@ from cellpose import models
 from cellpose.core import use_gpu
 import pandas as pd
 from skimage.transform import resize
+from src.segmentation.cellpose import segment_FOV
 from src.utilities.functions import path_leaf
 import zarr
-from src.utilities.image_utils import calculate_LoG
+from src.nucleus_dynamics.utilities.image_utils import calculate_LoG
 from functools import partial
 from tqdm.contrib.concurrent import process_map
 
@@ -117,88 +117,6 @@ def process_time_point(t, t0, data_tzyx, model_name, mask_zarr, prob_zarr, grad_
 
     else:
         logging.info(f"No image data found. Skipping time point.")
-def segment_FOV(
-    column: np.ndarray,
-    model=None,
-    do_3D: bool = True,
-    anisotropy=None,
-    diameter: float = 15,
-    cellprob_threshold: float = 0.0,
-    flow_threshold: float = 0.4,
-    min_size=None,
-    label_dtype=None,
-    pretrain_flag=False
-):
-    """
-    Internal function that runs Cellpose segmentation for a single ROI.
-
-    :param column: Three-dimensional numpy array
-    :param model: TBD
-    :param do_3D: TBD
-    :param anisotropy: TBD
-    :param diameter: TBD
-    :param cellprob_threshold: TBD
-    :param flow_threshold: TBD
-    :param min_size: TBD
-    :param label_dtype: TBD
-    """
-
-    # Write some debugging info
-    logging.info(
-        f"[segment_FOV] START Cellpose |"
-        f" column: {type(column)}, {column.shape} |"
-        f" do_3D: {do_3D} |"
-        f" model.diam_mean: {model.diam_mean} |"
-        f" diameter: {diameter} |"
-        f" flow threshold: {flow_threshold}"
-    )
-
-    # Actual labeling
-    t0 = time.perf_counter()
-    if not pretrain_flag:
-        mask, flows, styles = model.eval(
-            column,
-            channels=[0, 0],
-            do_3D=do_3D,
-            net_avg=False,
-            augment=False,
-            diameter=diameter,
-            anisotropy=anisotropy,
-            cellprob_threshold=cellprob_threshold,
-            flow_threshold=flow_threshold,
-        )
-    else:
-        mask, flows, styles = model.eval(
-            column,
-            channels=[0, 0],
-            do_3D=do_3D,
-            min_size=min_size,
-            diameter=diameter,
-            anisotropy=anisotropy,
-            cellprob_threshold=cellprob_threshold,
-            # net_avg=False,
-            augment=False
-        )
-    if not do_3D:
-        mask = np.expand_dims(mask, axis=0)
-    t1 = time.perf_counter()
-
-    # Write some debugging info
-    logging.info(
-        f"[segment_FOV] END   Cellpose |"
-        f" Elapsed: {t1-t0:.4f} seconds |"
-        f" mask shape: {mask.shape},"
-        f" mask dtype: {mask.dtype} (before recast to {label_dtype}),"
-        f" max(mask): {np.max(mask)} |"
-        f" model.diam_mean: {model.diam_mean} |"
-        f" diameter: {diameter} |"
-        f" anisotropy: {anisotropy} |"
-        f" flow threshold: {flow_threshold}"
-    )
-
-    probs = flows[2]
-    grads = flows[1]
-
     return mask.astype(label_dtype), probs, grads
 
 

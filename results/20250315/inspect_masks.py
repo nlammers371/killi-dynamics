@@ -2,7 +2,7 @@ import zarr
 import napari
 import os
 import numpy as np
-from src.build_killi.run02_segment_nuclei import Lo
+from src.segmentation import Lo
 
 import os
 os.environ["QT_API"] = "pyqt5"

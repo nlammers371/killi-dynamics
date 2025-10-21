@@ -9,7 +9,7 @@ from tqdm import tqdm
 from skimage import io
 from src.utilities.functions import path_leaf
 from skimage.filters import threshold_otsu
-from src.utilities.image_utils import calculate_LoG
+from src._Archive.utilities.image_utils import calculate_LoG
 import zarr
 import napari
 

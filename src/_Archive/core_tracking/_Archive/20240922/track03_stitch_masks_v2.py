@@ -1,6 +1,6 @@
 import os
 import zarr
-from src.utilities.image_utils import remove_background
+from src._Archive.utilities.image_utils import remove_background
 from src.utilities.functions import path_leaf
 import numpy as np
 from omnipose.core import compute_masks
