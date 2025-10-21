@@ -3,6 +3,9 @@ import os
 from functools import partial
 import multiprocessing
 
+
+AUTO_CSV_SENTINEL = object()
+
 import pandas as pd
 from skimage.registration import phase_cross_correlation
 from tqdm.contrib.concurrent import process_map
@@ -40,8 +43,21 @@ def align_halves(t, image_data1, image_data2, z_align_size=50, nucleus_channel=1
 
     return shift_corrected
 
-def get_hemisphere_shifts(root, side1_name, side2_name, interval=25, nucleus_channel=1, z_align_size=50,
-                          last_i=None, start_i=0, n_workers=None):
+def get_hemisphere_shifts(
+    root,
+    side1_name,
+    side2_name,
+    interval=25,
+    nucleus_channel=1,
+    z_align_size=50,
+    last_i=None,
+    start_i=0,
+    n_workers=None,
+    *,
+    side1_path=None,
+    side2_path=None,
+    csv_output_path=AUTO_CSV_SENTINEL,
+):
 
     if n_workers is None:
         total_cpus = multiprocessing.cpu_count()
@@ -75,6 +91,9 @@ def get_hemisphere_shifts(root, side1_name, side2_name, interval=25, nucleus_cha
     shift_df = pd.DataFrame(frame_vec, columns=["frame"])
     shift_df[["zs", "ys", "xs"]] = shift_array_interp
 
-    out_path = os.path.join(root, "metadata", side1_name, "")
-    os.makedirs(out_path, exist_ok=True)
-    shift_df.to_csv(os.path.join(out_path, side2_name + "_to_" + side1_name + "_shift_df.csv"), index=False)
+    if csv_output_path:
+        out_path = os.path.dirname(csv_output_path)
+        os.makedirs(out_path, exist_ok=True)
+        shift_df.to_csv(csv_output_path, index=False)
+
+    return shift_df
