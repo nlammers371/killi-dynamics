@@ -13,6 +13,7 @@ from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map
 
 from src.segmentation.mask_builders import perform_li_segmentation
+from src.data_io.zarr_utils import open_experiment_array
 
 def reset_dataset(store, name, shape, dtype, chunks, overwrite=False):
     if name in store:
@@ -41,14 +42,13 @@ def segment_nuclei_thresh(
         n_workers = max(1, total_cpus // 3)
 
     root = Path(root)
-    zarr_path = root / "built_data" / "zarr_image_files" / f"{project_name}.zarr"
 
     out_directory = root / "built_data" / "mask_stacks" / "li_segmentation"
     out_directory.mkdir(exist_ok=True)
 
     li_df = pd.read_csv(out_directory / f"{project_name}_li_thresh_trend.csv")
 
-    image_zarr = zarr.open(zarr_path.as_posix(), mode="r")
+    image_zarr, _store_path, _resolved_side = open_experiment_array(root, project_name)
     channel_list = image_zarr.attrs["channels"]
     multichannel_flag = len(channel_list) > 1
     if nuclear_channel is None:
