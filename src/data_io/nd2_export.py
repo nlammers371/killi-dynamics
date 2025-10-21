@@ -4,7 +4,7 @@ import glob2 as glob
 import os
 import nd2
 from tqdm import tqdm
-from src.utilities.extract_frame_metadata import extract_frame_metadata, permute_nd2_axes
+from src.data_io.nd2_metadata import extract_frame_metadata, permute_nd2_axes
 from tqdm.contrib.concurrent import process_map
 from functools import partial
 
@@ -116,3 +116,6 @@ def export_nd2_to_zarr(root,
         process_map(run_export, range(n_wells), max_workers=num_workers, chunksize=1)
 
     imObject.close()
+
+
+__all__ = ["write_to_zarr", "export_nd2_to_zarr"]

@@ -8,12 +8,13 @@ import napari
 from skimage.measure import regionprops, label
 from scipy.optimize import least_squares
 from scipy.spatial import distance_matrix
-from src.build_killi.process_masks import ellipsoid_axis_lengths
 from scipy.special import sph_harm
 from functools import partial
 from tqdm.contrib.concurrent import process_map
 import multiprocessing
 from scipy.interpolate import interp1d
+
+from src.qc.morphology import ellipsoid_axis_lengths
 
 # Assuming vertices is an (N, 3) array and radial_distances is the corresponding data.
 def cart2sph(x, y, z):
