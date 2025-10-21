@@ -1,4 +1,3 @@
-import zarr
 import napari
 from pathlib import Path
 import numpy as np
@@ -8,10 +7,11 @@ from skimage.measure import label
 from skimage import morphology, segmentation
 from scipy import ndimage as ndi
 
+from src.data_io.zarr_utils import open_experiment_array
+
 project_name = "MEM_NLS_test"
 data_root = r"E:\pipeline_dev\killi_dynamics"
-zarr_path = Path(data_root) / "built_data" / "zarr_image_files"/ f"{project_name}.zarr"
-im = zarr.open(zarr_path, mode='r')
+im, _store_path, _resolved_side = open_experiment_array(Path(data_root), project_name)
 ch = 1
 plot_frame = 30
 scale_vec = tuple(im.attrs['voxel_size_um'])  # (z, y, x) spacing in microns
