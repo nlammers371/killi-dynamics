@@ -7,6 +7,10 @@ from tqdm.contrib.concurrent import process_map
 from functools import partial
 import multiprocessing
 
+
+AUTO_CSV_SENTINEL = object()
+
+
 def align_halves(t, image_data1, image_data2, z_align_size=50, nucleus_channel=1):
 
     multichannel = len(image_data2.shape) > 4
@@ -38,17 +42,45 @@ def align_halves(t, image_data1, image_data2, z_align_size=50, nucleus_channel=1
 
     return shift_corrected
 
-def get_hemisphere_shifts(root, side1_name, side2_name, interval=25, nucleus_channel=1, z_align_size=50,
-                          last_i=None, start_i=0, n_workers=None):
+def get_hemisphere_shifts(
+    root,
+    side1_name,
+    side2_name,
+    interval=25,
+    nucleus_channel=1,
+    z_align_size=50,
+    last_i=None,
+    start_i=0,
+    n_workers=None,
+    *,
+    side1_path=None,
+    side2_path=None,
+    csv_output_path=AUTO_CSV_SENTINEL,
+):
 
     if n_workers is None:
         total_cpus = multiprocessing.cpu_count()
         # Limit to 25% of CPUs (rounded down, at least 1)
         n_workers = max(1, total_cpus // 4)
 
-    # load zarr files
-    side1_path = os.path.join(root, "built_data", "zarr_image_files", side1_name + ".zarr")
-    side2_path = os.path.join(root, "built_data", "zarr_image_files", side2_name + ".zarr")
+    if side1_path is None or side2_path is None:
+        if root is None:
+            raise ValueError(
+                "Either root must be provided to derive Zarr paths or explicit side paths must be supplied."
+            )
+        side1_path = os.path.join(root, "built_data", "zarr_image_files", side1_name + ".zarr")
+        side2_path = os.path.join(root, "built_data", "zarr_image_files", side2_name + ".zarr")
+
+    if csv_output_path is AUTO_CSV_SENTINEL:
+        if root is None:
+            csv_output_path = None
+        else:
+            csv_output_path = os.path.join(
+                root,
+                "metadata",
+                side1_name,
+                side2_name + "_to_" + side1_name + "_shift_df.csv",
+            )
 
     image_data1 = zarr.open(side1_path, mode="r")
     image_data2 = zarr.open(side2_path, mode="r")
@@ -77,6 +109,9 @@ def get_hemisphere_shifts(root, side1_name, side2_name, interval=25, nucleus_cha
     shift_df = pd.DataFrame(frame_vec, columns=["frame"])
     shift_df[["zs", "ys", "xs"]] = shift_array_interp
 
-    out_path = os.path.join(root, "metadata", side1_name, "")
-    os.makedirs(out_path, exist_ok=True)
-    shift_df.to_csv(os.path.join(out_path, side2_name + "_to_" + side1_name + "_shift_df.csv"), index=False)
+    if csv_output_path:
+        out_path = os.path.dirname(csv_output_path)
+        os.makedirs(out_path, exist_ok=True)
+        shift_df.to_csv(csv_output_path, index=False)
+
+    return shift_df

@@ -17,6 +17,7 @@ sharing a single top-level directory.
 
 from __future__ import annotations
 
+import multiprocessing
 import os
 import re
 import shutil
@@ -32,6 +33,7 @@ from skimage.transform import resize
 from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map
 
+from src.registration.image_fusion import get_hemisphere_shifts
 from src.utilities.functions import path_leaf
 
 _CHUNK_KEY_RE = re.compile(r"^(\d+)\..*$")  # capture leading time index
@@ -341,8 +343,21 @@ def export_czi_to_zarr(
     channels_to_keep: Optional[Iterable[bool]] = None,
     n_workers: int = 8,
     file_prefix: str | Iterable[str] | None = None,
+    *,
+    register_two_sided: bool = True,
+    registration_interval: int = 25,
+    registration_nucleus_channel: int = 1,
+    registration_z_align_size: int = 50,
+    registration_start_i: int = 0,
+    registration_last_i: Optional[int] = None,
+    registration_n_workers: Optional[int] = None,
 ):
-    """Export CZI datasets to Zarr with automatic multi-side handling."""
+    """Export CZI datasets to Zarr with automatic multi-side handling.
+
+    When a two-sided acquisition is detected, the hemisphere registration routine
+    is executed automatically (unless ``register_two_sided`` is ``False``) and the
+    resulting per-frame shifts are stored in the root Zarr group's attributes.
+    """
 
     par_flag = n_workers > 1
 
@@ -400,9 +415,12 @@ def export_czi_to_zarr(
         }
     )
 
+    side_zarr_paths: list[Path] = []
+
     for spec in side_specs:
         print(f"[export_czi_to_zarr_v2] Processing {spec.name} ({spec.source_type})")
         side_zarr_path = zarr_path / spec.name
+        side_zarr_paths.append(side_zarr_path)
         zarr_file, indices_to_write, time_stack_flag = initialize_zarr_store(
             side_zarr_path,
             image_list=spec.image_list,
@@ -456,6 +474,57 @@ def export_czi_to_zarr(
         else:
             for i in tqdm(indices_to_write, desc=f"Exporting {spec.name} to zarr"):
                 run_write_zarr(i)
+
+    if register_two_sided and len(side_specs) == 2:
+        ref_spec, moving_spec = side_specs
+        ref_path, moving_path = side_zarr_paths
+        print(
+            "[export_czi_to_zarr_v2] Running hemisphere registration between "
+            f"{ref_spec.name} and {moving_spec.name}"
+        )
+        if registration_n_workers is None:
+            total_cpus = multiprocessing.cpu_count()
+            registration_workers_used = max(1, total_cpus // 4)
+        else:
+            registration_workers_used = registration_n_workers
+
+        shift_df = get_hemisphere_shifts(
+            root=str(save_root),
+            side1_name=ref_spec.name,
+            side2_name=moving_spec.name,
+            interval=registration_interval,
+            nucleus_channel=registration_nucleus_channel,
+            z_align_size=registration_z_align_size,
+            last_i=registration_last_i if registration_last_i is not None else last_i,
+            start_i=registration_start_i,
+            n_workers=registration_workers_used,
+            side1_path=str(ref_path),
+            side2_path=str(moving_path),
+            csv_output_path=None,
+        )
+
+        registration_dict = {
+            "reference_side": ref_spec.name,
+            "moving_side": moving_spec.name,
+            "parameters": {
+                "interval": int(registration_interval),
+                "nucleus_channel": int(registration_nucleus_channel),
+                "z_align_size": int(registration_z_align_size),
+                "start_i": int(registration_start_i),
+                "last_i": (int(registration_last_i) if registration_last_i is not None else None),
+                "requested_last_i": (int(last_i) if last_i is not None else None),
+                "n_workers": int(registration_workers_used),
+            },
+            "shifts": {
+                "frame": shift_df["frame"].astype(int).tolist(),
+                "zs": shift_df["zs"].astype(float).tolist(),
+                "ys": shift_df["ys"].astype(float).tolist(),
+                "xs": shift_df["xs"].astype(float).tolist(),
+            },
+        }
+
+        root_group.attrs["hemisphere_registration"] = registration_dict
+        print("[export_czi_to_zarr_v2] Stored hemisphere registration metadata in Zarr attributes")
 
     print("Done.")
 
