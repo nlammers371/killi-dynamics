@@ -1,7 +1,7 @@
 """Backward-compatible import for the CZI export utilities."""
 from warnings import warn
 
-from src.data_io.czi_export import (
+from src.data_io._Archive.czi_export import (
     export_czi_to_zarr,
     get_prefix_list,
     initialize_zarr_store,
