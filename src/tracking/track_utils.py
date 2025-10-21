@@ -21,8 +21,6 @@ def labels_to_contours_nl(
     overwrite: bool = False,
     n_workers: Optional[int] = None,
     par_flag: bool = True,
-    last_filter_start_i: Optional[int] = None,
-    scale_vec: Optional[Tuple[float, float, float]] = None
 ) -> Tuple[ArrayLike, ArrayLike]:
     """
     Converts and merges a sequence of labels into ultrack input format (foreground and contours)
@@ -62,11 +60,7 @@ def labels_to_contours_nl(
 
 
     shape = (len(write_indices),) + labels.shape[1:]
-    # for lb in labels:
-    #     if shape != lb.shape:
-    #         raise ValueError(
-    #             f"All labels must have the same shape. Found {shape} and {lb.shape}"
-    #         )
+
 
     foreground = create_zarr(
         shape=shape,
@@ -83,9 +77,8 @@ def labels_to_contours_nl(
         default_store_type=zarr.TempStore,
     )
 
-    label_fun_run = partial(label_fun, labels=labels, foreground=foreground, contours=contours, shape=shape,
-                            sigma=sigma, last_filter_start_i=last_filter_start_i, scale_vec=scale_vec,
-                            write_indices=write_indices)
+    label_fun_run = partial(label_fun, write_indices=write_indices, labels=labels, foreground=foreground,
+                            contours=contours, shape=shape, sigma=sigma)
 
     if par_flag:
         print("Using parallel processing")

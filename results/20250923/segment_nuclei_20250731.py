@@ -7,7 +7,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]   # adjust “2” if levels dif
 # Put that directory at the *front* of sys.path so Python looks there first
 sys.path.insert(0, str(REPO_ROOT))
 
-from src.nucleus_dynamics.build.build01_segment_nuclei_zarr import cellpose_segmentation
+from src._Archive.nucleus_dynamics.build import cellpose_segmentation
 
 
 if __name__ == '__main__':
