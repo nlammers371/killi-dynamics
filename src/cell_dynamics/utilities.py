@@ -8,10 +8,13 @@ from scipy.sparse.linalg import spsolve
 from sklearn.neighbors import BallTree
 import astropy.units as u
 
-def load_tracking_data(root: str,
-                       project_name: str,
-                       track_config_name: str,
-                       track_instance_str: str | None = None):
+
+def load_tracking_data(
+    root: str,
+    project_name: str,
+    track_config_name: str,
+    track_instance_str: str | None = None,
+):
     root = Path(root)
     track_dir = root / "tracking" / project_name / track_config_name
     if track_instance_str is None:
@@ -43,7 +46,6 @@ def load_tracking_data(root: str,
 
 
 def laplacian_smooth(field, tau=0.2, steps=2):
-
     npix = field.size
     nside = int(np.sqrt(npix / 12))
     hp = HEALPix(nside, order="nested")
@@ -52,15 +54,16 @@ def laplacian_smooth(field, tau=0.2, steps=2):
         nbrs = hp.neighbours(p)
         nbrs = nbrs[nbrs >= 0]
         deg = len(nbrs)
-        rows.extend([p]*deg + [p])
+        rows.extend([p] * deg + [p])
         cols.extend(nbrs.tolist() + [p])
-        data.extend([-1.0]*deg + [deg])
+        data.extend([-1.0] * deg + [deg])
     L = csr_matrix((data, (rows, cols)), shape=(npix, npix))
-    A = eye(npix, format='csr') + tau * L
+    A = eye(npix, format="csr") + tau * L
     f = field.astype(float)
     for _ in range(steps):
         f = spsolve(A, f)
     return f
+
 
 def smooth_field_on_sphere_knn(field, sigma_deg=10.0, k=25, max_mult=3.0):
     """
@@ -75,7 +78,7 @@ def smooth_field_on_sphere_knn(field, sigma_deg=10.0, k=25, max_mult=3.0):
     lat = lat.to_value(u.rad)
 
     coords = np.column_stack((lat, lon))
-    tree = BallTree(coords, metric='haversine')
+    tree = BallTree(coords, metric="haversine")
 
     # query k nearest neighbors (returns distances in radians)
     dists, idxs = tree.query(coords, k=k)
@@ -84,7 +87,7 @@ def smooth_field_on_sphere_knn(field, sigma_deg=10.0, k=25, max_mult=3.0):
     mask = dists <= max_mult * sigma_rad  # (npix, k)
 
     # Gaussian weights
-    w = np.exp(-(dists**2) / (2 * sigma_rad**2))
+    w = np.exp(-(dists ** 2) / (2 * sigma_rad**2))
     w *= mask
 
     # Normalize weights so each row sums to 1
@@ -97,3 +100,17 @@ def smooth_field_on_sphere_knn(field, sigma_deg=10.0, k=25, max_mult=3.0):
     smoothed = np.sum(w * v, axis=1)
 
     return smoothed
+
+
+def smooth_on_sphere(field: np.ndarray, sigma_deg: float = 10.0, k: int = 25) -> np.ndarray:
+    """Compatibility wrapper used by the analysis pipeline."""
+
+    return smooth_field_on_sphere_knn(field, sigma_deg=sigma_deg, k=k)
+
+
+__all__ = [
+    "load_tracking_data",
+    "laplacian_smooth",
+    "smooth_field_on_sphere_knn",
+    "smooth_on_sphere",
+]
