@@ -58,18 +58,16 @@ rgba = np.array(base.colors)[64:, :]
 
 # set the first entry to white (or transparent white)
 # rgba[0, :3] = [1, 1, 1]   # RGB white
-rgba[0, 3]  = 1.0         # alpha=1 (or 0.0 if you want transparency)
-rgba[0, -1]  = 0
+rgba[0, 3] = 1.0         # alpha=1 (or 0.0 if you want transparency)
+rgba[0, -1] = 0
 # build a new colormap
 bop_blue_white = Colormap(rgba, name="bop_blue_white")
-
-
 
 # --- NEW: smoothing + color params ---
 SMOOTH_WINDOW = 15          # in frames; odd numbers look nice with center=True
 COLOR_MIN, COLOR_MAX = -1, 1   # set the color range you want for v_rad_smooth
 N = 40
-tail_length = 100
+tail_length = 120
 LCP_THRESH = 200
 USE_MIP = True
 MASK_R = 550
@@ -98,13 +96,12 @@ if USE_MIP:
 else:
     suffix = ""
 
-root = r"E:\Nick\Cole Trapnell's Lab Dropbox\Nick Lammers\Nick\killi_tracker"
+root = r"E:\Nick\killi_tracker"
 project_name = "20241126_LCP1-NLSMSC"
 image_path = os.path.join(root, "built_data", "zarr_image_files",  project_name + suffix + ".zarr")
 track_name = "tracking_lcp_nuclei"
-tracks_csv = os.path.join(root, "tracking", project_name, track_name, "well0000",
-                          "track_0000_0719", "tracks_dist.csv")
-OUTDIR = Path(r"E:\Nick\Cole Trapnell's Lab Dropbox\Nick Lammers\Nick\killi_tracker\figures\syd_paper") / project_name / f"frames{out_suffix}"
+tracks_csv = os.path.join(root, "tracking", project_name, track_name, "track_0000_0719", "tracks_dist.csv")
+OUTDIR = Path(r"E:\Nick\killi_tracker\figures\syd_paper") / project_name / f"frames{out_suffix}"
 OUTDIR.mkdir(parents=True, exist_ok=True)
 
 # Lazy array with time axis intact: shape like (T, Z, Y, X)
@@ -168,9 +165,9 @@ else:
 #     opacity=0.9,
 #     rgb=False,
 # )
-
-ch0 = image_da[:, 0, :, :]
-ch1 = image_da[:, 1, :, :]
+image_da = np.moveaxis(image_da, 2, 3)
+ch0 = image_da[:, 0, ::-1, :]
+ch1 = image_da[:, 1, ::-1, :]
 
 
 layer1 = viewer.add_image(ch1, colormap="gray" + nls_suffix, opacity=0.9, blending="translucent_no_depth",
@@ -190,6 +187,13 @@ props = {
     # --- NEW: expose smoothed values to layer properties ---
     "v_rad_smooth": tracks_df["v_rad_smooth"].to_numpy(),
 }
+
+tracks_df["x_orig"] = tracks_df["x"].to_numpy()
+tracks_df["y_orig"] = tracks_df["y"].to_numpy()
+tracks_df["x"] = tracks_df["y_orig"].copy()
+tracks_df["y"] = tracks_df["x_orig"].copy()
+
+tracks_df["y"] = (ch0.shape[-2] - 1)*scale_vec[-2] - tracks_df["y"]
 
 if not USE_MIP:
     fields = ["track_id", "t", "z", "y", "x"]
@@ -246,6 +250,7 @@ if HEADLESS:
     for i, t in enumerate(tqdm(range(0, n_frames, stride), "Exporting frames...")):
         viewer.dims.set_current_step(0, t)
         arr = viewer.screenshot(canvas_only=True, scale=scale_factor)
+
         font = ImageFont.truetype("arial.ttf", 24)
         img = Image.fromarray(arr)
         draw = ImageDraw.Draw(img)
