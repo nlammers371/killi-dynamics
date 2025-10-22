@@ -181,9 +181,7 @@ def load_tracking_data(root: str,
 
     # we have to rescale x,y,z to microns...
     im_zarr = zarr.open(root / "built_data" / "zarr_image_files" / f"{project_name}_fused.zarr", mode="r")
-    scale_vec = np.array([im_zarr.attrs["PhysicalSizeZ"],
-                          im_zarr.attrs["PhysicalSizeY"],
-                          im_zarr.attrs["PhysicalSizeX"]])
+    scale_vec = np.array(im_zarr.attrs["voxel_Size_um"])
     tracks_df[["z", "y", "x"]] = np.multiply(tracks_df[["z", "y", "x"]].to_numpy(), scale_vec[None, :])
 
     return tracks_df, sphere_df, class_df
