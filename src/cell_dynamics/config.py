@@ -10,7 +10,7 @@ from typing import Tuple
 class GridConfig:
     """Parameters controlling HEALPix grid construction and indexing."""
 
-    nsides: Tuple[int, int] = (16, 32)
+    nsides: Tuple[int, int] = (8, 16, 32, 64, 128)
     frame_col: str = "frame"
     time_col: str = "time_min"
     xyz_cols: Tuple[str, str, str] = ("x", "y", "z")
