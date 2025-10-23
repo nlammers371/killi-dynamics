@@ -102,7 +102,7 @@ def smooth_tracks(tracks: pd.DataFrame, smooth_cfg: SmoothingConfig) -> pd.DataF
     if len(coord_cols) != 3:
         return tracks.copy()
 
-    track_col = "particle" if "particle" in tracks.columns else None
+    track_col = "track_id" if "track_id" in tracks.columns else None
     time_col = "frame" if "frame" in tracks.columns else "time_min" if "time_min" in tracks.columns else None
 
     if track_col is None or time_col is None:
