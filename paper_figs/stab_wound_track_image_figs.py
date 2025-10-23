@@ -38,16 +38,9 @@ add_matplotlib_cmap_to_napari("PRGn")
 
 # get napari's bop blue colormap
 base = AVAILABLE_COLORMAPS["bop orange"]
-
-# copy its colors to numpy array
 rgba = np.array(base.colors)
-
-# set the first entry to white (or transparent white)
-# rgba[0, :3] = [1, 1, 1]   # RGB white
-# rgba[0, 3]  = 1.0         # alpha=1 (or 0.0 if you want transparency)
 rgba[0, -1] = 0
-# build a new colormap
-bop_orange = Colormap(rgba, name="bop_blue_white")
+bop_orange = Colormap(rgba, name="bop_orange")
 
 
 # get napari's bop blue colormap
