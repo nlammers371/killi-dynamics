@@ -31,8 +31,8 @@ HEADLESS = True
 settings_dict = {"Movie1_NLSxLCP1_Aggregation_72-96hpf": {"LCP_MIN": 125, "LCP_MAX": 300, "NLS_MIN": 100, "NLS_MAX": 2500, "DT": 90},
                  "Movie2_ALPM_NLSxLCP1_102hpfStart": {"LCP_MIN": 175, "LCP_MAX": 300, "NLS_MIN": 175, "NLS_MAX": 2500, "DT": 90},
                  "Movie3_stab-wound_Complete": {"LCP_MIN": 200, "LCP_MAX": 500, "NLS_MIN": 100, "NLS_MAX": 5000, "DT": 90},
-                 "Movie4_NLSxLCP1_A830148-72_movie73-98hpf": {"LCP_MIN": 125, "LCP_MAX": 300, "NLS_MIN":100, "NLS_MAX": 2500, "DT": 90},
-                 "Movie5_LCP1_HighRes_96hpf": {"LCP_MIN": 125, "LCP_MAX":500, "NLS_MIN":100, "NLS_MAX": 2500, "DT": 60}}
+                 "Movie4_NLSxLCP1_A830148-72_movie73-98hpf": {"LCP_MIN": 125, "LCP_MAX": 300, "NLS_MIN": 100, "NLS_MAX": 2500, "DT": 90},
+                 "Movie5_LCP1_HighRes_96hpf": {"LCP_MIN": 125, "LCP_MAX": 500, "NLS_MIN": 100, "NLS_MAX": 2500, "DT": 60}}
 
 # get list of  directories in folder path
 data_folders = sorted([f.name for f in os.scandir(folder_path) if f.is_dir()])
@@ -40,7 +40,7 @@ data_folders = sorted([f.name for f in os.scandir(folder_path) if f.is_dir()])
 OUTROOT= Path(r"E:\Nick\killi_immuno_paper\figures\movies")
 
 
-for folder_i, folder in enumerate(tqdm(data_folders[1:], desc="Processing folders...", position=0)):
+for folder_i, folder in enumerate(tqdm([data_folders[2]], desc="Processing folders...", position=0)):
     OUTDIR = OUTROOT / folder
     OUTDIR.mkdir(parents=True, exist_ok=True)
 
@@ -53,15 +53,18 @@ for folder_i, folder in enumerate(tqdm(data_folders[1:], desc="Processing folder
 
     # get list of czi files in folder
     czi_list = sorted([f.path for f in os.scandir(folder_path / folder) if f.name.endswith(".czi")])
+    if folder == "Movie3_stab-wound_Complete":
+        root = r"E:\Nick\killi_immuno_paper"
+        project_name = "20241126_LCP1-NLSMSC"
+        image_path = os.path.join(root, "built_data", "zarr_image_files", project_name + "_mip.zarr")
+        czi_list = [image_path]
+
     for czi_i, czi_path in enumerate(tqdm(czi_list, desc="Processing CZIs...", position=1, leave=False)):
 
         # Lazy array with time axis intact: shape like (T, Z, Y, X)
         if folder == "Movie3_stab-wound_Complete":
-            root = r"E:\Nick\killi_tracker"
-            project_name = "20241126_LCP1-NLSMSC"
-            image_path = os.path.join(root, "built_data", "zarr_image_files", project_name + "_mip.zarr")
-            image_da = da.from_zarr(image_path)
-            image_z = zarr.open(image_path, mode="r")
+            image_da = da.from_zarr(czi_path)
+            image_z = zarr.open(czi_path, mode="r")
 
             scale_vec = (
                 image_z.attrs["PhysicalSizeZ"],
@@ -85,12 +88,12 @@ for folder_i, folder in enumerate(tqdm(data_folders[1:], desc="Processing folder
         # permute
         if folder == "Movie3_stab-wound_Complete":
             image_da = np.moveaxis(image_da, 2, 3)
-            image_da = image_da[:, 0, ::-1, :]
-            image_da = image_da[:, 1, ::-1, :]
-
-        ch0 = np.squeeze(image_da[:, 0, :, :])
-        if folder != "Movie5_LCP1_HighRes_96hpf":
-            ch1 = np.squeeze(image_da[:, 1, :, :])
+            ch0 = image_da[:, 0, ::-1, :]
+            ch1 = image_da[:, 1, ::-1, :]
+        else:
+            ch0 = np.squeeze(image_da[:, 0, :, :])
+            if folder != "Movie5_LCP1_HighRes_96hpf":
+                ch1 = np.squeeze(image_da[:, 1, :, :])
 
         if folder != "Movie5_LCP1_HighRes_96hpf":
             layer1 = viewer.add_image(ch1, colormap="gray" , opacity=0.9, blending="translucent_no_depth",
