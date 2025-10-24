@@ -20,7 +20,6 @@ from __future__ import annotations
 import multiprocessing
 import os
 import re
-import shutil
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
@@ -375,10 +374,7 @@ def export_czi_to_zarr(
             raise ValueError("channel_names must be provided if channels_to_keep is used.")
         channel_names = [ch for ch, keep in zip(channel_names, channels_to_keep) if keep]
 
-    zarr_path = save_root / "built_data" / "zarr_image_files" / f"{project_name}.zarr"
-    if overwrite_flag and zarr_path.exists():
-        shutil.rmtree(zarr_path)
-    os.makedirs(zarr_path, exist_ok=True)
+    store_path = save_root / "built_data" / "zarr_image_files" / f"{project_name}.zarr"
 
     raw_path = raw_data_root / "raw_image_data" / project_name
     if not raw_path.exists():
@@ -399,7 +395,8 @@ def export_czi_to_zarr(
 
     side_specs = _detect_side_specs(czi_files)
 
-    root_group = zarr.open_group(str(zarr_path), mode="a")
+    mode = "w" if overwrite_flag else "a"
+    root_group = zarr.open_group(str(store_path), mode=mode)
     root_group.attrs.update(
         {
             "project_name": project_name,
@@ -419,7 +416,7 @@ def export_czi_to_zarr(
 
     for spec in side_specs:
         print(f"[export_czi_to_zarr_v2] Processing {spec.name} ({spec.source_type})")
-        side_zarr_path = zarr_path / spec.name
+        side_zarr_path = store_path / spec.name
         side_zarr_paths.append(side_zarr_path)
         zarr_file, indices_to_write, time_stack_flag = initialize_zarr_store(
             side_zarr_path,
@@ -524,14 +521,14 @@ def export_czi_to_zarr(
         }
 
         root_group.attrs["hemisphere_registration"] = registration_dict
-        print("[export_czi_to_zarr_v2] Stored hemisphere registration metadata in Zarr attributes")
+        print("[export_czi_to_zarr] Stored hemisphere registration metadata in Zarr attributes")
 
     print("Done.")
 
 
 __all__ = [
     "SideSpec",
-    "export_czi_to_zarr_v2",
+    "export_czi_to_zarr",
     "initialize_zarr_store",
     "write_zarr",
 ]

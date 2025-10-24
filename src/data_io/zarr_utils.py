@@ -19,6 +19,57 @@ import zarr
 
 FUSED_ALIASES: tuple[str, ...] = ("fused", "fusion", "fused_image")
 
+import zarr
+from pathlib import Path
+from typing import Optional, Any, Dict
+
+
+def get_metadata(
+    root: Path | str,
+    project_name: str,
+    *,
+    group_name: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Return the attribute dictionary from the first array or group
+    inside a Zarr store.
+
+    Parameters
+    ----------
+    store_path : Path or str
+        Path to the Zarr store directory.
+    group_name : str, optional
+        If provided, return attrs from this subgroup instead of the first found.
+
+    Returns
+    -------
+    attrs : dict
+        The attribute dictionary (may be empty if no attrs found).
+    """
+    root = Path(root)
+    store_dir = root / "built_data" / "zarr_image_files"
+    store_path = store_dir / f"{project_name}.zarr"
+    store = zarr.open(store_path, mode="r")
+
+    # Direct array case
+    if isinstance(store, zarr.Array):
+        return dict(store.attrs)
+
+    # If a specific subgroup is requested
+    if group_name is not None and group_name in store:
+        node = store[group_name]
+        return dict(node.attrs)
+
+    # Otherwise, use your existing first-array traversal logic
+    for name, array in store.arrays():
+        return dict(array.attrs)
+    for name, subgroup in store.groups():
+        attrs = get_first_attrs(store_path / name)
+        if attrs:
+            return attrs
+
+    # If nothing found, return empty dict
+    return {}
 
 def _side_aliases(index: int) -> list[str]:
     """Return a list of plausible group names for a given side index."""
