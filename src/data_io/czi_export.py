@@ -32,7 +32,7 @@ from skimage.transform import resize
 from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map
 
-from src.registration.image_fusion import get_hemisphere_shifts
+from src.registration._Archive.image_fusion import get_hemisphere_shifts
 from src.utilities.functions import path_leaf
 
 _CHUNK_KEY_RE = re.compile(r"^(\d+)\..*$")  # capture leading time index
