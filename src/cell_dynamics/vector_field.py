@@ -92,7 +92,7 @@ class VectorFieldResult:
     jacobian: np.ndarray
 
 
-def smooth_tracks(tracks: pd.DataFrame, smooth_cfg: SmoothingConfig) -> pd.DataFrame:
+def smooth_tracks(tracks: pd.DataFrame, smooth_cfg: SmoothingConfig, dT: float) -> pd.DataFrame:
     """Apply Savitzky–Golay smoothing to Cartesian coordinates per track."""
 
     if tracks.empty:
@@ -103,20 +103,22 @@ def smooth_tracks(tracks: pd.DataFrame, smooth_cfg: SmoothingConfig) -> pd.DataF
         return tracks.copy()
 
     track_col = "track_id" if "track_id" in tracks.columns else None
-    time_col = "frame" if "frame" in tracks.columns else "time_min" if "time_min" in tracks.columns else None
+    time_col = "time_min" if "time_min" in tracks.columns else "t" if "t" in tracks.columns else None
+    if time_col is None or track_col is None:
+        raise ValueError("Tracks dataframe requires a temporal column (time_min/t) and a track ID column (track_id).")
 
     if track_col is None or time_col is None:
         return tracks.copy()
 
     smoothed = tracks.copy()
     smoothed = smoothed.sort_values([track_col, time_col])
-
+    sg_window_frames = int(smooth_cfg.sg_window_minutes / dT) // 2 * 2 + 1
     for _, group in smoothed.groupby(track_col):
         idx = group.index
         n = len(group)
-        if n < 2:
+        if n < 3:
             continue
-        window = min(smooth_cfg.sg_window_frames, n)
+        window = min(sg_window_frames, n)
         if window % 2 == 0:
             window = max(3, window - 1)
         if window < 3:
@@ -168,16 +170,14 @@ def build_step_table(tracks: pd.DataFrame) -> StepTable:
     if not required.issubset(tracks.columns):
         raise ValueError("Tracks dataframe must contain Cartesian coordinates 'x', 'y', 'z'.")
 
-    track_col = "particle" if "particle" in tracks.columns else None
+    track_col = "track_id" if "track_id" in tracks.columns else None
     if track_col is None:
         raise ValueError("Tracks dataframe must contain a 'particle' column.")
 
     if "time_min" in tracks.columns:
         time_col = "time_min"
     elif "time" in tracks.columns:
-        time_col = "time"
-    elif "frame" in tracks.columns:
-        time_col = "frame"
+        time_col = "t"
     else:
         raise ValueError("Tracks dataframe requires a temporal column (time_min/time/frame).")
 
@@ -191,7 +191,8 @@ def build_step_table(tracks: pd.DataFrame) -> StepTable:
     mid_times: list[np.ndarray] = []
 
     for idx, (tid, group) in enumerate(tracks.sort_values([track_col, time_col]).groupby(track_col)):
-        coords = group[["x", "y", "z"]].to_numpy(dtype=float)
+        coords = group[["x", "y", "z"]].to_numpy(dtype=float) - \
+                 group[["center_x_smooth", "center_y_smooth", "center_z_smooth"]].to_numpy(dtype=float)
         times = group[time_col].to_numpy(dtype=float)
         if coords.shape[0] < 2:
             continue
@@ -345,7 +346,7 @@ def compute_vector_field(
         velocities = step_table.velocities
 
         pixel_area = 4.0 * np.pi / healpix_nside2npix(nside)
-        space_sigma = max(np.sqrt(pixel_area), 1e-3)
+        space_sigma = max(2*np.sqrt(pixel_area), 1e-3)
 
         for t_index, center_time in enumerate(grid_result.time_centers):
             time_weights = np.exp(-0.5 * ((step_times - center_time) / max(time_sigma, 1e-6)) ** 2)

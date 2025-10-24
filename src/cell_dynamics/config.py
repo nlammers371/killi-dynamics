@@ -21,17 +21,17 @@ class GridConfig:
 class WindowConfig:
     """Parameters describing temporal windowing of the tracks."""
 
-    win_minutes: float = 60.0
-    stride_minutes: float = 10.0
-    coarse_minutes: float = 45.0
-    fine_minutes: float = 15.0
+    win_minutes: float = 60.0  # window size for binned dynamics
+    stride_minutes: float = 15.0  # stride between windows
+    coarse_minutes: float = 45.0  # ??
+    fine_minutes: float = 15.0  # ??
 
 
 @dataclass(slots=True)
 class SmoothingConfig:
     """Parameters for Savitzky–Golay smoothing of particle tracks."""
 
-    sg_window_frames: int = 11
+    sg_window_minutes: float = 15.0
     sg_poly: int = 2
 
 
