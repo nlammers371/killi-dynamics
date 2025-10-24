@@ -40,7 +40,7 @@ data_folders = sorted([f.name for f in os.scandir(folder_path) if f.is_dir()])
 OUTROOT= Path(r"E:\Nick\killi_immuno_paper\figures\movies")
 
 
-for folder_i, folder in enumerate(tqdm([data_folders[2]], desc="Processing folders...", position=0)):
+for folder_i, folder in enumerate(tqdm(data_folders, desc="Processing folders...", position=0)):
     OUTDIR = OUTROOT / folder
     OUTDIR.mkdir(parents=True, exist_ok=True)
 
@@ -144,7 +144,7 @@ for folder_i, folder in enumerate(tqdm([data_folders[2]], desc="Processing folde
 
                 draw.text(pos, label, fill=text_color, font=font)
 
-                outpath = outdir / f"{folder}_iter{i:04d}_side{czi_i:02d}.png"
+                outpath = outdir / f"{folder}_side{czi_i:02d}_iter{i:04d}.png"
                 img.save(outpath)
 
         else:
