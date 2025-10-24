@@ -122,14 +122,14 @@ def fit_surf_sphere_trend(
 
     # set up path
     root = Path(root)
-    out_root = root / "output_data" / "sphere_projections" / "surf_fields"
+    out_root = root / "geometry"
     out_root.mkdir(parents=True, exist_ok=True)
     if well is not None:
         mask_path = root / "built_data" / "mask_stacks" / seg_type / f"{project_name}_well{well:04}_masks.zarr"
-        sphere_fit_path = out_root / f"{project_name}_well{well:04}_sphere_fits.zarr"
+        sphere_fit_path = out_root / f"{project_name}_well{well:04}_sphere_fits.csv"
     else:
         mask_path = root / "built_data" / "mask_stacks" / seg_type / f"{project_name}_masks.zarr"
-        sphere_fit_path = out_root / f"{project_name}_sphere_fits.zarr"
+        sphere_fit_path = out_root / f"{project_name}_sphere_fits.csv"
 
     # get basic stats
     mask_store = zarr.open(mask_path, mode="r")
