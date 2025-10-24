@@ -1,7 +1,7 @@
 """Utilities for constructing simplified HEALPix-style grids and binning tracks."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterable
 
 import numpy as np
@@ -38,7 +38,9 @@ except ModuleNotFoundError:  # pragma: no cover - fallback path
         hp_obj = _healpix_obj(int(nside))
         theta = np.asarray(theta)
         phi = np.asarray(phi)
-        return np.asarray(hp_obj.angle_to_healpix(theta * u.rad, phi * u.rad), dtype=int)
+        lon = phi
+        lat = np.pi / 2 - theta
+        return hp_obj.lonlat_to_healpix(lon * u.rad, lat * u.rad).astype(int)
 
     def healpix_pix2ang(nside: int, pix: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         hp_obj = _healpix_obj(int(nside))
@@ -65,7 +67,7 @@ class HealpixIndexer:
     """
 
     nside: int
-
+    npix: int = field(init=False)
     def __post_init__(self) -> None:
         self.npix = healpix_nside2npix(self.nside)
 

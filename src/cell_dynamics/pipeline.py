@@ -4,10 +4,10 @@ from __future__ import annotations
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
-
+from src.cell_dynamics.cd_utils import add_sphere_coords_to_tracks
 import pandas as pd
-
-from .config import (
+from src.data_io.zarr_utils import get_metadata
+from src.cell_dynamics.config import (
     GridConfig,
     MaterialsConfig,
     NoiseConfig,
@@ -16,43 +16,44 @@ from .config import (
     SmoothingConfig,
     WindowConfig,
 )
-from . import flux, grids, io, materials, metrics, msd, qc, vector_field
-from .utilities import load_tracking_data
+from src.cell_dynamics import flux, grids, io_functions, materials, metrics, msd, qc, vector_field
+from src.cell_dynamics.cd_utils import load_tracking_data
 
 
-def _normalise_tracking_output(data: Any) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Normalise the return signature from :func:`load_tracking_data`."""
+# def _normalise_tracking_output(data: Any) -> tuple[pd.DataFrame, pd.DataFrame]:
+#     """Normalise the return signature from :func:`load_tracking_data`."""
+#
+#     if isinstance(data, tuple):
+#         if len(data) == 2:
+#             first, second = data
+#         elif len(data) >= 3:
+#             first, second = data[:2]
+#         else:
+#             raise ValueError("Unexpected tuple length returned by load_tracking_data")
+#     else:
+#         raise TypeError("load_tracking_data must return a tuple of DataFrames")
+#
+#     if "particle" in getattr(first, "columns", []):
+#         tracks_df, sphere_df = first, second
+#     else:
+#         sphere_df, tracks_df = first, second
+#
+#     if not isinstance(tracks_df, pd.DataFrame) or not isinstance(sphere_df, pd.DataFrame):
+#         raise TypeError("load_tracking_data must return pandas.DataFrame objects")
 
-    if isinstance(data, tuple):
-        if len(data) == 2:
-            first, second = data
-        elif len(data) >= 3:
-            first, second = data[:2]
-        else:
-            raise ValueError("Unexpected tuple length returned by load_tracking_data")
-    else:
-        raise TypeError("load_tracking_data must return a tuple of DataFrames")
-
-    if "particle" in getattr(first, "columns", []):
-        tracks_df, sphere_df = first, second
-    else:
-        sphere_df, tracks_df = first, second
-
-    if not isinstance(tracks_df, pd.DataFrame) or not isinstance(sphere_df, pd.DataFrame):
-        raise TypeError("load_tracking_data must return pandas.DataFrame objects")
-
-    return sphere_df, tracks_df
+    # return sphere_df, tracks_df
 
 
 def run(
-    out_root: Path,
+    root: Path,
+    project_name: str,
+    track_config_name: str,
     grid_cfg: GridConfig = GridConfig(),
     win_cfg: WindowConfig = WindowConfig(),
     smooth_cfg: SmoothingConfig = SmoothingConfig(),
     qc_cfg: QCConfig = QCConfig(),
     noise_cfg: NoiseConfig = NoiseConfig(),
     mat_cfg: MaterialsConfig = MaterialsConfig(),
-    load_kwargs: dict[str, Any] | None = None,
     *,
     overwrite: bool = False,
 ) -> dict[str, Any]:
@@ -64,20 +65,22 @@ def run(
     downstream notebooks while the full scientific algorithms are developed.
     """
 
+    out_root = root / "cell_dynamics" / project_name / track_config_name
     out_root = Path(out_root)
     out_root.mkdir(parents=True, exist_ok=True)
+    load_kwargs = {
+        "root": root,
+        "project_name": project_name,
+        "track_config_name": track_config_name,
+    }
 
-    load_kwargs = load_kwargs or {}
-    try:
-        data = load_tracking_data(**load_kwargs)
-    except TypeError as exc:  # pragma: no cover - defensive path
-        raise RuntimeError(
-            "load_tracking_data requires keyword arguments. Provide them via 'load_kwargs'."
-        ) from exc
+    tracks_df, sphere_df, class_df = load_tracking_data(**load_kwargs)
 
-    sphere_df, tracks_df = _normalise_tracking_output(data)
-
-    smoothed_tracks = vector_field.smooth_tracks(tracks_df, smooth_cfg)
+    # sphere_df, tracks_df = _normalise_tracking_output(data)
+    metadata = get_metadata(root, project_name)
+    smoothed_tracks = vector_field.smooth_tracks(tracks_df, smooth_cfg, metadata["time_resolution_s"] / 60)
+    smoothed_tracks = add_sphere_coords_to_tracks(smoothed_tracks, sphere_df)
+    # smoothed_tracks.drop(columns=["center_x_smooth", "center_y_smooth", "center_z_smooth", "radius_smooth"], inplace=True)
 
     grid_indexers = grids.build_healpix_indexers(grid_cfg.nsides)
     binned_tracks = grids.bin_tracks_over_time(
@@ -113,7 +116,7 @@ def run(
         qc_cfg,
     )
 
-    zarr_paths = io.write_zarr_stores(
+    zarr_paths = io_functions.write_zarr_stores(
         out_root,
         grid_indexers,
         binned_tracks,
@@ -129,7 +132,7 @@ def run(
         noise_cfg,
     )
 
-    augmented_tracks, tracks_path = io.augment_tracks_df(
+    augmented_tracks, tracks_path = io_functions.augment_tracks_df(
         smoothed_tracks,
         grid_indexers,
         metric_results,
@@ -162,3 +165,18 @@ def run(
 
 
 __all__ = ["run"]
+
+if __name__ == "__main__":
+    import pprint
+
+    root = Path(r"E:\pipeline_dev\killi_dynamics")
+    project_name = "MEM_NLS_test"
+    tracking_config = "tracking_v0"
+    result_summary = run(
+        root=root,
+        project_name=project_name,
+        track_config_name=tracking_config,
+        grid_cfg=GridConfig(nsides=[8, 16]),
+        win_cfg=WindowConfig(win_minutes=30.0, stride_minutes=10.0),
+    )
+    pprint.pprint(result_summary)
