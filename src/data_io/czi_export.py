@@ -32,7 +32,7 @@ from skimage.transform import resize
 from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map
 
-from src.registration._Archive.image_fusion import get_hemisphere_shifts
+from src.registration.register_hemispheres import get_hemisphere_shifts
 from src.utilities.functions import path_leaf
 
 _CHUNK_KEY_RE = re.compile(r"^(\d+)\..*$")  # capture leading time index
@@ -331,7 +331,7 @@ def write_zarr(
 
 
 def export_czi_to_zarr(
-    raw_data_root: Path | str,
+    raw_data_dir: Path | str,
     project_name: str,
     tres: Optional[float] = None,
     save_root: Path | str | None = None,
@@ -344,8 +344,8 @@ def export_czi_to_zarr(
     file_prefix: str | Iterable[str] | None = None,
     *,
     register_two_sided: bool = True,
-    registration_interval: int = 25,
-    registration_nucleus_channel: int = 1,
+    registration_interval: int = 10,
+    registration_nucleus_channel: int = None,
     registration_z_align_size: int = 50,
     registration_start_i: int = 0,
     registration_last_i: Optional[int] = None,
@@ -359,10 +359,12 @@ def export_czi_to_zarr(
     """
 
     par_flag = n_workers > 1
+    if registration_n_workers is None:
+        registration_n_workers = n_workers
 
-    raw_data_root = Path(raw_data_root)
+    raw_data_dir = Path(raw_data_dir)
     if save_root is None:
-        save_root = raw_data_root
+        save_root = raw_data_dir
     else:
         save_root = Path(save_root)
 
@@ -376,12 +378,11 @@ def export_czi_to_zarr(
 
     store_path = save_root / "built_data" / "zarr_image_files" / f"{project_name}.zarr"
 
-    raw_path = raw_data_root / "raw_image_data" / project_name
-    if not raw_path.exists():
-        raise FileNotFoundError(f"Could not locate raw image directory: {raw_path}")
+    if not raw_data_dir.exists(): 
+        raise FileNotFoundError(f"Could not locate raw image directory: {raw_data_dir}")
 
     if file_prefix is None:
-        czi_files = sorted(raw_path.glob("*.czi"))
+        czi_files = sorted(raw_data_dir.glob("*.czi"))
     else:
         prefixes = (
             [file_prefix]
@@ -390,7 +391,7 @@ def export_czi_to_zarr(
         )
         czi_files = []
         for prefix in prefixes:
-            czi_files.extend(sorted(raw_path.glob(f"{prefix}*.czi")))
+            czi_files.extend(sorted(raw_data_dir.glob(f"{prefix}*.czi")))
         czi_files = sorted(set(czi_files))
 
     side_specs = _detect_side_specs(czi_files)
@@ -415,7 +416,7 @@ def export_czi_to_zarr(
     side_zarr_paths: list[Path] = []
 
     for spec in side_specs:
-        print(f"[export_czi_to_zarr_v2] Processing {spec.name} ({spec.source_type})")
+        print(f"[export_czi_to_zarr] Processing {spec.name} ({spec.source_type})")
         side_zarr_path = store_path / spec.name
         side_zarr_paths.append(side_zarr_path)
         zarr_file, indices_to_write, time_stack_flag = initialize_zarr_store(
@@ -474,7 +475,6 @@ def export_czi_to_zarr(
 
     if register_two_sided and len(side_specs) == 2:
         ref_spec, moving_spec = side_specs
-        ref_path, moving_path = side_zarr_paths
         print(
             "[export_czi_to_zarr_v2] Running hemisphere registration between "
             f"{ref_spec.name} and {moving_spec.name}"
@@ -485,42 +485,19 @@ def export_czi_to_zarr(
         else:
             registration_workers_used = registration_n_workers
 
-        shift_df = get_hemisphere_shifts(
-            root=str(save_root),
-            side1_name=ref_spec.name,
-            side2_name=moving_spec.name,
+        # Writes registration metadata to zarr store
+        get_hemisphere_shifts(
+            zarr_root=store_path,
+            ref_side=ref_spec.name,
+            mov_side=moving_spec.name,
             interval=registration_interval,
             nucleus_channel=registration_nucleus_channel,
             z_align_size=registration_z_align_size,
             last_i=registration_last_i if registration_last_i is not None else last_i,
             start_i=registration_start_i,
             n_workers=registration_workers_used,
-            side1_path=str(ref_path),
-            side2_path=str(moving_path),
-            csv_output_path=None,
         )
 
-        registration_dict = {
-            "reference_side": ref_spec.name,
-            "moving_side": moving_spec.name,
-            "parameters": {
-                "interval": int(registration_interval),
-                "nucleus_channel": int(registration_nucleus_channel),
-                "z_align_size": int(registration_z_align_size),
-                "start_i": int(registration_start_i),
-                "last_i": (int(registration_last_i) if registration_last_i is not None else None),
-                "requested_last_i": (int(last_i) if last_i is not None else None),
-                "n_workers": int(registration_workers_used),
-            },
-            "shifts": {
-                "frame": shift_df["frame"].astype(int).tolist(),
-                "zs": shift_df["zs"].astype(float).tolist(),
-                "ys": shift_df["ys"].astype(float).tolist(),
-                "xs": shift_df["xs"].astype(float).tolist(),
-            },
-        }
-
-        root_group.attrs["hemisphere_registration"] = registration_dict
         print("[export_czi_to_zarr] Stored hemisphere registration metadata in Zarr attributes")
 
     print("Done.")
