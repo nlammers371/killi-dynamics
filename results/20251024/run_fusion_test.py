@@ -15,9 +15,9 @@ store = zarr.open(zarr_path, mode="r")
 
 vf = VirtualFuseArray(
     zarr_path,
-    overlap_z=40,
+    overlap_z=30,
     use_gpu=True,      # make sure this is True
-    interp="nearest",
+    interp="linear",
 )
 
 print(vf)

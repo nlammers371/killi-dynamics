@@ -6,6 +6,8 @@ from typing import Tuple, Literal
 import numpy as np
 import pandas as pd
 import zarr
+import dask.array as da
+from dask import delayed
 
 # -------------------- optional GPU backend --------------------
 try:
@@ -17,7 +19,13 @@ except Exception:
     _DEFAULT_XP = np
     _HAS_GPU = False
     print("[VirtualFuseArray] CuPy not found; using NumPy backend.")
-
+if _HAS_GPU:
+    import cupy as cp
+    from cupyx.scipy import ndimage as sp_nd
+    _meta_scalar = cp.array((), dtype=np.float32)
+else:
+    from scipy import ndimage as sp_nd
+    _meta_scalar = np.array((), dtype=np.float32)
 
 class VirtualFuseArray:
     """
@@ -42,7 +50,7 @@ class VirtualFuseArray:
         self.ref = self.root[self.ref_name]
         self.mov = self.root[self.mov_name]
 
-        self.overlap_z = int(overlap_z)
+        # self.overlap_z = int(overlap_z)
         self.interp = interp
         self.use_gpu = bool(use_gpu and _HAS_GPU)
         self.xp = _DEFAULT_XP if self.use_gpu else np
@@ -69,6 +77,14 @@ class VirtualFuseArray:
         self.shape = (self.ref.shape[0], self.C, Zr + Zm, Yr, Xr)
         self.attrs = dict(self.root.attrs)
 
+        # add other useful attributes
+        self.attrs['voxel_size_um'] = self.ref.attrs.get('voxel_size_um', None)
+        self.attrs['time_resolution_s'] = self.ref.attrs.get('time_resolution_s', None)
+        self.attrs["dim_order"] = self.ref.attrs.get("dim_order", None)
+        self.attrs["dim_order"] = self.ref.attrs.get("dim_order", None)
+        self.attrs["raw_voxel_scale_um"] = self.ref.attrs.get("raw_voxel_scale_um", None)
+
+
     # ---------------- Metadata helpers ---------------- #
     @staticmethod
     def _parse_side_meta(attrs) -> dict:
@@ -86,6 +102,41 @@ class VirtualFuseArray:
     @staticmethod
     def _side_spatial(shape: Tuple[int, ...], meta: dict) -> Tuple[int, int, int]:
         return tuple(shape[meta["idx"][ax]] for ax in "ZYX")
+
+    # put this in the class (near other helpers)
+    def _normalize_c_sel(self, side_group, meta, c_sel):
+        """Return (indexer, C_len, squeeze_c). Accepts int/slice/iterable.
+           For TZYX (no channels), always returns slice(None), 1, squeeze_c=(c_sel is int).
+        """
+        import numbers
+        if meta["dim_order"] == "TZYX":
+            # single-channel data: pretend C=1 and optionally squeeze later if user gave an int
+            squeeze_c = isinstance(c_sel, numbers.Integral)
+            return slice(None), 1, squeeze_c
+
+        # TCZYX
+        C_total = side_group.shape[meta["idx"]["C"]]
+        squeeze_c = isinstance(c_sel, numbers.Integral)
+
+        if isinstance(c_sel, numbers.Integral):
+            if not (0 <= int(c_sel) < C_total):
+                raise IndexError(f"channel index {int(c_sel)} out of range 0..{C_total - 1}")
+            return int(c_sel), 1, True
+
+        if isinstance(c_sel, slice):
+            start, stop, step = c_sel.indices(C_total)
+            C_len = max(0, (stop - start + (abs(step) - 1)) // (step if step > 0 else -step))
+            return slice(start, stop, step), C_len, False
+
+        # iterable (list/array) of channels
+        idx = list(c_sel)
+        if len(idx) == 0:
+            return [], 0, False
+        # (optional) bounds check
+        if not all(0 <= int(i) < C_total for i in idx):
+            raise IndexError("channel index out of range")
+        return idx, len(idx), False
+
 
     def _load_transform(self, tdict: dict) -> dict:
         flip = np.array(tdict.get("flip", [False, False, False]), dtype=bool)
@@ -149,71 +200,165 @@ class VirtualFuseArray:
                 arr = arr[np.newaxis, ...]
         return self.xp.asarray(arr) if self.use_gpu else arr
 
-    # ---------------- Fusion core ---------------- #
     def _fuse_time_roi(self, t, c_sel, zf_slice, yf_slice, xf_slice):
         xp = self.xp
         Zr, Yr, Xr = self._side_spatial(self.ref.shape, self.ref_meta)
         Zm, Ym, Xm = self._side_spatial(self.mov.shape, self.mov_meta)
         full_Z = Zr + Zm
+
+        # --- normalize channel selection ONCE and reuse for both sides ---
+        c_indexer_ref, C_len, squeeze_c = self._normalize_c_sel(self.ref, self.ref_meta, c_sel)
+        # we assume sides have matching channels; reuse same c_indexer for mov
+        c_indexer_mov = c_indexer_ref
+
+        # fused ROI
         z0, z1, _ = zf_slice.indices(full_Z)
         y0, y1, _ = yf_slice.indices(Yr)
         x0, x1, _ = xf_slice.indices(Xr)
-        Z_len, Y_len, X_len = z1 - z0, y1 - y0, x1 - x0
+        Z_len, Y_len, X_len = full_Z, Yr, Xr #z1 - z0, y1 - y0, x1 - x0
 
+        # shifts / flips as before ...
         shift = np.zeros(3, float)
         if self.mov_tf["per_frame"] is not None and t < len(self.mov_tf["per_frame"]):
             shift[:] = self.mov_tf["per_frame"][t]
         (dzi, dyi, dxi), (dzf, dyf, dxf) = self._split_shift(shift)
         fz, fy, fx = self.mov_tf["flip"].tolist()
 
-        # z positioning
-        ref_z0, ref_z1 = Zm, Zm + Zr
-        mov_start = Zm - dzi
-        mov_z0, mov_z1 = mov_start, mov_start + Zm
-        rf0, rf1 = max(z0, ref_z0), min(z1, ref_z1)
-        mf0, mf1 = max(z0, mov_z0), min(z1, mov_z1)
-        rz0, rz1 = max(0, rf0 - Zm), max(0, rf1 - Zm)
-        mz0, mz1 = max(0, mf0 - mov_start), max(0, mf1 - mov_start)
-        r_out0, r_out1 = max(0, rf0 - z0), max(0, rf1 - z0)
-        m_out0, m_out1 = max(0, mf0 - z0), max(0, mf1 - z0)
+        # z placement + native/fused ranges ... (keep your current logic)
+        # ref_z0, ref_z1 = Zm, Zm + Zr
+        # mov_z0, mov_z1 = dzi, dzi + Zm
 
-        # Y/X
-        my0, my1 = max(0, y0 - dyi), max(0, y0 - dyi + (y1 - y0))
-        mx0, mx1 = max(0, x0 - dxi), max(0, x0 - dxi + (x1 - x0))
-        m_out_y0, m_out_y1 = max(0, dyi), max(0, dyi + (y1 - y0))
-        m_out_x0, m_out_x1 = max(0, dxi), max(0, dxi + (x1 - x0))
+        # REFERENCE indexing
+        rz0, rz1 = 0, Zr
+        r_out_z0, r_out_z1 = Zm, Zr + Zm
 
-        ref_buf = xp.zeros((self.C, Z_len, Y_len, X_len), xp.float32)
-        mov_buf = xp.zeros_like(ref_buf)
+        # MOVING indexing
+        mz0, mz1 = max(0, -dzi), Zm
+        m_out_z0, m_out_z1 = max(0, dzi), max(0, dzi) + (mz1 - mz0)
 
+        # no Y (assume non inverted)
+        ys = -1
+        my0, my1 = max(0, ys * dyi), min(Ym, Ym + ys * dyi)
+        m_out_y0 = max(0, ys * dyi)
+        m_out_y1 = max(0, ys * dyi) + (my1 - my0)
+
+        # no X (assume inverted)
+        xs = 1
+        mx0, mx1 = max(0, xs * dxi), min(Xm, Xm + xs * dxi)
+        m_out_x0, m_out_x1 = max(0, xs * dxi), max(0, xs * dxi) + (mx1 - mx0)
+
+        # small helper to create a lazily-read block
+        def _delayed_read_ref():
+            # returns xp array, float32, shape: (C_len, rz1-rz0, Yr, Xr)
+            arr = self._read_side_roi_czyx(
+                self.ref, self.ref_meta, t, c_indexer_ref,
+                slice(rz0, rz1), slice(0, Yr), slice(0, Xr)
+            ).astype(xp.float32, copy=False)
+            return arr
+
+        def _delayed_read_mov():
+            # returns xp array, float32, shape: (C_len, mz1-mz0, my1-my0, mx1-mx0)
+            arr = self._read_side_roi_czyx(
+                self.mov, self.mov_meta, t, c_indexer_mov,
+                slice(mz0, mz1), slice(my0, my1), slice(mx0, mx1)
+            ).astype(xp.float32, copy=False)
+            return arr
+
+        dtype = xp.float32
+        # lazily make reference block (or empty)
         if rz1 > rz0:
-            ref_block = self._read_side_roi_czyx(self.ref, self.ref_meta, t, c_sel,
-                                                 slice(rz0, rz1), slice(y0, y1), slice(x0, x1))
-            ref_buf[:, r_out0:r_out1] = ref_block.astype(xp.float32, copy=False)
-        if mz1 > mz0:
-            mov_block = self._read_side_roi_czyx(self.mov, self.mov_meta, t, c_sel,
-                                                 slice(mz0, mz1), slice(my0, my1), slice(mx0, mx1))
-            mov_block = mov_block.astype(xp.float32, copy=False)
-            sl = (slice(None),
-                  slice(None, None, -1) if fz else slice(None),
-                  slice(None, None, -1) if fy else slice(None),
-                  slice(None, None, -1) if fx else slice(None))
-            mov_block = mov_block[sl]
-            if self.interp == "linear":
-                mov_block = self._apply_fractional_shift_zyx(mov_block, dzf, dyf, dxf)
-            mov_buf[:, m_out0:m_out1, m_out_y0:m_out_y1, m_out_x0:m_out_x1] = mov_block
+            # 1️⃣ use xp dtype for delayed blocks
+            ref_block = da.from_delayed(
+                delayed(_delayed_read_ref)(),
+                shape=(C_len, rz1 - rz0, Yr, Xr),
+                dtype=dtype,
+                meta=_meta_scalar
+            )
+        else:
+            ref_block = da.zeros((C_len, 0, Yr, Xr), dtype=np.float32)
 
-        fused = ref_buf + mov_buf
-        ov0, ov1 = max(r_out0, m_out0), min(r_out1, m_out1)
-        if ov1 > ov0:
-            L = ov1 - ov0
-            ramp = min(L, max(1, self.overlap_z))
-            s = ov0 + (L - ramp) // 2
-            e = s + ramp
-            w = xp.linspace(0, 1, ramp, dtype=xp.float32)[None, :, None, None]
-            a, b = ref_buf[:, s:e], mov_buf[:, s:e]
-            fused[:, s:e] = (1 - w) * a + w * b
-        return fused.astype(self.dtype, copy=False)
+        # lazily make moving block (or empty)
+        if mz1 > mz0:
+            mov_block = da.from_delayed(
+                delayed(_delayed_read_mov)(),
+                shape=(C_len, mz1 - mz0, my1 - my0, mx1 - mx0),
+                dtype=dtype,
+                meta=_meta_scalar
+            )
+        else:
+            mov_block = da.zeros((C_len, 0, 0, 0), dtype=np.float32)
+
+        # flips (lazy slicing)
+        sl = (
+            slice(None),
+            slice(None, None, -1) if fz else slice(None),
+            slice(None, None, -1) if fy else slice(None),
+            slice(None, None, -1) if fx else slice(None),
+        )
+        mov_block = mov_block[sl]
+
+        # fractional shift (only if linear)
+        def _shift_block(arr, dzf, dyf, dxf):
+            # 'arr' will be a numpy or cupy array depending on backend
+            # order=1, mode="nearest" to match your logic
+            return sp_nd.shift(arr, shift=(0, dzf, dyf, dxf), order=1, mode="nearest")
+
+        if self.interp == "linear" and mov_block.shape[1] > 0:
+            mov_block = da.map_blocks(
+                _shift_block, mov_block,
+                dtype=np.float32,
+                dzf=dzf, dyf=dyf, dxf=dxf,
+                meta=_meta_scalar
+            )
+
+        # ---- place blocks into the full fused canvas lazily via padding ----
+        # reference placement: pad Z to [r_out_z0:r_out_z1], Y to [0:Yr], X to [0:Xr]
+        # pad spec: ((C_pre,C_post),(Z_pre,Z_post),(Y_pre,Y_post),(X_pre,X_post))
+        def _pad_to_canvas(block, z0, z1, y0, y1, x0, x1):
+            block = block.map_blocks(xp.asarray)  # enforce backend
+            z_pre, z_post = z0, Z_len - z1
+            y_pre, y_post = y0, Y_len - y1
+            x_pre, x_post = x0, X_len - x1
+            pad_widths = ((0, 0), (z_pre, z_post), (y_pre, y_post), (x_pre, x_post))
+            return da.pad(block, pad_widths, mode="constant", constant_values=0)
+
+        # ref goes to [r_out_z0:r_out_z1, 0:Yr, 0:Xr]
+        ref_canvas = _pad_to_canvas(ref_block, r_out_z0, r_out_z1, 0, Yr, 0, Xr)
+
+        # mov goes to [m_out_z0:m_out_z1, m_out_y0:m_out_y1, m_out_x0:m_out_x1]
+        mov_canvas = _pad_to_canvas(mov_block, m_out_z0, m_out_z1, m_out_y0, m_out_y1, m_out_x0, m_out_x1)
+
+        # ---- linear crossfade over Z-overlap, lazily (no in-place updates) ----
+        # default sum outside overlap
+        base_sum = ref_canvas + mov_canvas
+
+        # overlap along Z in ROI coordinates
+        ov0 = max(r_out_z0, m_out_z0)
+        ov1 = min(r_out_z1, m_out_z1)
+        L = ov1 - ov0
+
+        if L > 0:
+            # build broadcastable z-index and weights lazily
+            if self.use_gpu:
+                z = da.from_array(self.xp.arange(Z_len, dtype=self.xp.int32))[None, :, None, None]
+            else:
+                z = da.arange(Z_len, dtype=np.int32)[None, :, None, None]
+            in_ov = (z >= ov0) & (z < ov1)
+            # weight w ranges 0..1 across ov0..ov1-1
+            # clamp outside overlap so it doesn't matter
+            w = ((z - ov0) / max(L, 1)).astype(np.float32)
+            w = da.clip(w, 0.0, 1.0)
+
+            blended = w * ref_canvas + (1.0 - w) * mov_canvas
+            fused = da.where(in_ov, blended, base_sum)
+        else:
+            fused = base_sum
+
+        # final crop to the requested fused ROI
+        fused = fused[:, zf_slice, yf_slice, xf_slice]
+        out = fused.compute()
+        out = self.xp.asarray(out, dtype=self.dtype)
+        return out
 
     # ---------------- Indexing ---------------- #
     def __getitem__(self, key):
@@ -244,4 +389,5 @@ class VirtualFuseArray:
         backend = "GPU(CuPy)" if self.use_gpu else "CPU(NumPy)"
         return (f"<VirtualFuseArray shape={self.shape} dtype={self.dtype} "
                 f"sides=({self.ref_name}, {self.mov_name}) "
-                f"overlap_z={self.overlap_z} interp='{self.interp}' backend={backend}>")
+                # f"overlap_z={self.overlap_z} "
+                f"interp='{self.interp}' backend={backend}>")
