@@ -27,31 +27,33 @@ def parse_plate_metadata(root, experiment_date, sheet_names=None):
 
     well_coord_list = np.asarray(well_coord_list)
 
-    xl_temp = pd.ExcelFile(plate_directory)
-    # extract nd2 series info
-    series_vec_raw = xl_temp.parse(sheet_names[0]).iloc[0:8, 1:13].values.ravel()
-    nn_indices = np.where(~np.isnan(series_vec_raw))[0]
-    series_vec = series_vec_raw[nn_indices]
-    # extract staging info
-    start_age_hpf = xl_temp.parse(sheet_names[2]).iloc[0:8, 1:13].values.ravel()
-    start_age_hpf = start_age_hpf[nn_indices]
-    # extract genotype info
-    genotype_vec = xl_temp.parse(sheet_names[1]).iloc[0:8, 1:13].values.ravel()
-    genotype_vec = genotype_vec[nn_indices]
+    if Path(plate_directory).is_file():
+        xl_temp = pd.ExcelFile(plate_directory)
+        # extract nd2 series info
+        series_vec_raw = xl_temp.parse(sheet_names[0]).iloc[0:8, 1:13].values.ravel()
+        nn_indices = np.where(~np.isnan(series_vec_raw))[0]
+        series_vec = series_vec_raw[nn_indices]
+        # extract staging info
+        start_age_hpf = xl_temp.parse(sheet_names[2]).iloc[0:8, 1:13].values.ravel()
+        start_age_hpf = start_age_hpf[nn_indices]
+        # extract genotype info
+        genotype_vec = xl_temp.parse(sheet_names[1]).iloc[0:8, 1:13].values.ravel()
+        genotype_vec = genotype_vec[nn_indices]
 
-    # extract chemical info
-    chem_vec = xl_temp.parse(sheet_names[3]).iloc[0:8, 1:13].values.ravel()
-    chem_vec = chem_vec[nn_indices]
+        # extract chemical info
+        chem_vec = xl_temp.parse(sheet_names[3]).iloc[0:8, 1:13].values.ravel()
+        chem_vec = chem_vec[nn_indices]
 
-    # get list of well ID coordinates
-    well_coord_list = well_coord_list[nn_indices]
+        # get list of well ID coordinates
+        well_coord_list = well_coord_list[nn_indices]
 
-    plate_df = pd.DataFrame(series_vec[:, np.newaxis], columns=["nd2_series"])
-    plate_df["well_id"] = well_coord_list
-    plate_df["genotype"] = genotype_vec
-    plate_df["chem_i"] = chem_vec
-    plate_df["start_age_hpf"] = start_age_hpf
-
+        plate_df = pd.DataFrame(series_vec[:, np.newaxis], columns=["nd2_series"])
+        plate_df["well_id"] = well_coord_list
+        plate_df["genotype"] = genotype_vec
+        plate_df["chem_i"] = chem_vec
+        plate_df["start_age_hpf"] = start_age_hpf
+    else:
+        plate_df = pd.DataFrame(columns=["nd2_series", "well_id", "genotype", "chem_i", "start_age_hpf"])
     return plate_df
 
 def permute_nd2_axes(nd2_object):
@@ -125,8 +127,11 @@ def parse_nd2_metadata(nd2_path):
                       range(0, n_frames_total, n_z_slices)]
 
     # check for common nd2 artifact where time stamps jump midway through
-    dt_frame_approx = (imObject.frame_metadata(n_z_slices).channels[0].time.relativeTimeMs -
-                       imObject.frame_metadata(0).channels[0].time.relativeTimeMs) / 1000
+    if len(frame_time_vec) > 1:
+        dt_frame_approx = (imObject.frame_metadata(n_z_slices).channels[0].time.relativeTimeMs -
+                           imObject.frame_metadata(0).channels[0].time.relativeTimeMs) / 1000
+    else:
+        dt_frame_approx = 0
 
     jump_ind = np.where(np.diff(frame_time_vec) > 2 * dt_frame_approx)[0]  # typically it is multiple orders of magnitude to large
     if len(jump_ind) > 0:
@@ -240,7 +245,10 @@ def extract_frame_metadata(
 
     # get time res
     temp_df = well_df.loc[well_df["well_index"] == well_df.loc[0, "well_index"]].reset_index(drop=True)
-    metadata["dt"] = temp_df.loc[1, "time"] - temp_df.loc[0, "time"]
+    if temp_df.shape[0] > 1:
+        metadata["dt"] = temp_df.loc[1, "time"] - temp_df.loc[0, "time"]
+    else:
+        metadata["dt"] = np.nan
 
     # reorder columns
     col_union = plate_cols.tolist() + well_cols.tolist()
