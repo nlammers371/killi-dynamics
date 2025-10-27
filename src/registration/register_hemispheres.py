@@ -37,7 +37,7 @@ def align_halves(t, image_data1, image_data2, z_align_size=50, nucleus_channel=1
 
 
 def get_hemisphere_shifts(zarr_root: Path, ref_side: str = "side_00", mov_side: str = "side_01",
-                          interval: int = 25, nucleus_channel: int = 1, z_align_size: int = 50,
+                          interval: int = 10, nucleus_channel: int = None, z_align_size: int = 50,
                           start_i: int = 0, last_i: int | None = None, n_workers: int | None = None):
     """Estimate per-frame shifts and update Zarr metadata."""
     zarr_root = Path(zarr_root)
@@ -48,6 +48,19 @@ def get_hemisphere_shifts(zarr_root: Path, ref_side: str = "side_00", mov_side: 
 
     image_data1 = zarr.open(ref_path, mode="r")
     image_data2 = zarr.open(mov_path, mode="r")
+
+    if nucleus_channel is None:
+        channels = image_data1.attrs.get("channels", None)
+        # find channel that contains "NLS" or H2B"
+
+        for i, ch_name in enumerate(channels):
+            if "NLS" in ch_name.upper() or "H2B" in ch_name.upper():
+                nucleus_channel = i
+                print(f"→ Using channel {i} ('{ch_name}') as nucleus channel for alignment.")
+                break
+
+    if nucleus_channel is None:
+        raise ValueError("Nucleus channel not specified and could not be inferred from metadata.")
 
     n_frames = min(image_data1.shape[0], image_data2.shape[0])
     if last_i is None:
