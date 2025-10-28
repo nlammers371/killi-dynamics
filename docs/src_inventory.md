@@ -1,26 +1,17 @@
 # Current `src` Inventory
 
-Snapshot of the pre-refactor layout (excluding `var/`). Only the first two levels are expanded to keep the view reviewable.
+Snapshot of the active, post-reorg layout (excluding `var/`). The first two levels are expanded so reviewers can spot the
+major packages without wading through implementation details.
 
 ````
 src/
     ├── _Archive/
-        ├── core_tracking/
-        ├── __init__.py
-    ├── build_lightsheet/
-        ├── __init__.py
-        ├── build_utils.py
-        ├── fit_embryo_surface.py
-        ├── fuse_masks.py
-        ├── nucleus_classification.py
-        ├── process_masks.py
-        ├── run00_get_frame_shifts.py
-        ├── run01_get_hemisphere_shifts.py
-        ├── run02_segment_nuclei.py
-        ├── stitch_image_stacks.py
-        ├── track_processing.py
+        ├── build_lightsheet/
+        ├── nucleus_dynamics/
+        ├── track_processing/
+        ├── utilities/
+        └── vae/
     ├── build_yx1/
-        ├── __init__.py
         ├── export_nd2_to_zarr.py
         ├── fit_embryo_surface.py
         ├── make_field_plots.py
@@ -28,64 +19,67 @@ src/
         ├── project_density_fields.py
         ├── project_scalar_fields.py
         ├── surface_stats.py
+    ├── calculate_cell_fields/
+        ├── build_nucleus_data.py
+        ├── calculate_fields.py
+        ├── cluster_tracking.py
+        ├── density_functions.py
+        ├── plotting.py
+    ├── cell_dynamics/
+        ├── adaptivity.py
+        ├── cd_utils.py
+        ├── config.py
+        ├── flux.py
+        ├── grids.py
+        ├── io_functions.py
+        ├── materials.py
+        ├── metrics.py
+        ├── msd.py
+        ├── pipeline.py
+        ├── qc.py
+        ├── vector_field.py
     ├── data_io/
         ├── __init__.py
         ├── czi_export.py
         ├── nd2_export.py
-        ├── nd2_metadata.py
+        └── _Archive/
     ├── geometry/
         ├── __init__.py
         ├── sphere.py
-        ├── spherical_harmonics.py
+        └── spherical_harmonics.py
     ├── image_utils/
-        ├── do_mip_projections.py
-    ├── nucleus_dynamics/
-        ├── build/
-        ├── export_to_zarr/
-        ├── tracking/
-        ├── utilities/
+        └── do_mip_projections.py
     ├── pipelines/
         ├── __init__.py
-        ├── lightsheet_cli.py
+        └── lightsheet_cli.py
     ├── qc/
-        ├── __init__.py
         ├── mask_qc.py
         ├── morphology.py
         ├── shadows.py
-        ├── volumes.py
+        ├── surf.py
+        └── volumes.py
+    ├── registration/
+        ├── fuse_on_disk.py
+        ├── register_hemispheres.py
+        ├── virtual_fusion.py
+        └── _Archive/
     ├── segmentation/
-        ├── __init__.py
         ├── cellpose.py
+        ├── li_thresholding.py
         ├── mask_builders.py
         ├── postprocess.py
-        ├── thresholding.py
-    ├── symmetry_breaking/
-        ├── cluster_tracking.py
-        ├── density_functions.py
-    ├── track_processing/
-        ├── filter_tracks.py
+        └── segmentation_wrappers.py
     ├── tracking/
-        ├── __init__.py
-        ├── workflow.py
+        ├── core_tracking.py
+        ├── track_utils.py
+        └── workflow.py
     ├── utilities/
-        ├── __init__.py
-        ├── convert_to_zarr.py
-        ├── extract_frame_metadata.py
-        ├── functions.py
-        ├── image_utils.py
-        ├── io.py
-        ├── plot_functions.py
-        ├── plot_utils.py
-        ├── register_image_stacks.py
-        ├── shape_utils.py
-    ├── vae/
-        ├── auxiliary_scripts/
-        ├── models/
-        ├── pipelines/
-        ├── trainers/
-        ├── __init__.py
-        ├── config.py
-        ├── customexception.py
+        └── functions.py
+    ├── visualization/
+        ├── check_thresholds.py
+        ├── inspect_masks.py
+        ├── zarr_to_napari.py
+        └── _Archive/
     ├── __init__.py
-    ├── README.md
+    └── README.md
 ````
