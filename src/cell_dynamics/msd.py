@@ -26,7 +26,7 @@ def _prepare_tracks(tracks: pd.DataFrame) -> Dict[int, dict[str, np.ndarray]]:
     if tracks.empty:
         return {}
 
-    if "particle" not in tracks.columns:
+    if "track_id" not in tracks.columns:
         raise ValueError("Tracks dataframe must contain a 'particle' column for MSD calculations.")
 
     if "time_min" in tracks.columns:
@@ -43,7 +43,7 @@ def _prepare_tracks(tracks: pd.DataFrame) -> Dict[int, dict[str, np.ndarray]]:
         raise ValueError("Tracks dataframe must contain Cartesian coordinates 'x', 'y', 'z'.")
 
     prepared: Dict[int, dict[str, np.ndarray]] = {}
-    for tid, group in tracks.sort_values(["particle", time_col]).groupby("particle"):
+    for tid, group in tracks.sort_values(["track_id", time_col]).groupby("track_id"):
         coords = group[["x", "y", "z"]].to_numpy(dtype=float)
         times = group[time_col].to_numpy(dtype=float)
         if coords.shape[0] < 2:
