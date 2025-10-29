@@ -446,8 +446,8 @@ def export_czi_to_zarr(
         else:
             image_time_stamps = list(range(zarr_file.shape[0]))
 
-        image_indices = np.arange(len(image_time_stamps))
-        indices_to_write = np.where(np.isin(image_indices, indices_to_write))[0]
+        # image_indices = np.arange(len(image_time_stamps))
+        indices_to_write = np.where(np.isin(image_time_stamps, indices_to_write))[0]
 
         run_write_zarr = partial(
             write_zarr,

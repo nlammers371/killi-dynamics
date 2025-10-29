@@ -2,7 +2,7 @@ from __future__ import annotations
 import numbers
 from pathlib import Path
 from typing import Tuple, Literal
-
+from scipy.ndimage import gaussian_filter
 import numpy as np
 import pandas as pd
 import zarr
@@ -38,8 +38,9 @@ class VirtualFuseArray:
         store_path: str | Path,
         moving_side: str = "side_01",
         reference_side: str = "side_00",
-        overlap_z: int = 30,
+        eval_mode: bool = False,
         use_gpu: bool = True,
+        # seam_sigma_px: tuple = (1.0, 0.5, 0.5),
         interp: Literal["nearest", "linear"] = "nearest",
     ):
         self.store_path = Path(store_path)
@@ -49,9 +50,11 @@ class VirtualFuseArray:
         self.mov_name = moving_side
         self.ref = self.root[self.ref_name]
         self.mov = self.root[self.mov_name]
-
-        # self.overlap_z = int(overlap_z)
+        self.eval_mode = eval_mode
+        # self.seam_sigma_px = seam_sigma_px
         self.interp = interp
+        if self.eval_mode:
+            self.interp = "nearest"
         self.use_gpu = bool(use_gpu and _HAS_GPU)
         self.xp = _DEFAULT_XP if self.use_gpu else np
 
@@ -81,7 +84,7 @@ class VirtualFuseArray:
         self.attrs['voxel_size_um'] = self.ref.attrs.get('voxel_size_um', None)
         self.attrs['time_resolution_s'] = self.ref.attrs.get('time_resolution_s', None)
         self.attrs["dim_order"] = self.ref.attrs.get("dim_order", None)
-        self.attrs["dim_order"] = self.ref.attrs.get("dim_order", None)
+        self.attrs["channels"] = self.ref.attrs.get("channels", None)
         self.attrs["raw_voxel_scale_um"] = self.ref.attrs.get("raw_voxel_scale_um", None)
 
 
@@ -223,7 +226,8 @@ class VirtualFuseArray:
             shift[:] = self.mov_tf["per_frame"][t]
         (dzi, dyi, dxi), (dzf, dyf, dxf) = self._split_shift(shift)
         fz, fy, fx = self.mov_tf["flip"].tolist()
-
+        # fx = True
+        # fy = True
         # z placement + native/fused ranges ... (keep your current logic)
         # ref_z0, ref_z1 = Zm, Zm + Zr
         # mov_z0, mov_z1 = dzi, dzi + Zm
@@ -231,10 +235,16 @@ class VirtualFuseArray:
         # REFERENCE indexing
         rz0, rz1 = 0, Zr
         r_out_z0, r_out_z1 = Zm, Zr + Zm
+        # if self.eval_mode:
+        #     rz0 = rz0 - dzi
+        #     r_out_z0 = r_out_z0 - dzi
+
 
         # MOVING indexing
         mz0, mz1 = max(0, -dzi), Zm
         m_out_z0, m_out_z1 = max(0, dzi), max(0, dzi) + (mz1 - mz0)
+        # if self.eval_mode:
+        #     m_out_z0 = m_out_z0 + dzi
 
         # no Y (assume non inverted)
         ys = -1
@@ -324,7 +334,8 @@ class VirtualFuseArray:
 
         # ref goes to [r_out_z0:r_out_z1, 0:Yr, 0:Xr]
         ref_canvas = _pad_to_canvas(ref_block, r_out_z0, r_out_z1, 0, Yr, 0, Xr)
-
+        if self.eval_mode:
+            ref_canvas[:, Zm:Zm+dzi, :, :] = 0  # no-op to adjust for shift in eval mode?
         # mov goes to [m_out_z0:m_out_z1, m_out_y0:m_out_y1, m_out_x0:m_out_x1]
         mov_canvas = _pad_to_canvas(mov_block, m_out_z0, m_out_z1, m_out_y0, m_out_y1, m_out_x0, m_out_x1)
 
@@ -337,7 +348,7 @@ class VirtualFuseArray:
         ov1 = min(r_out_z1, m_out_z1)
         L = ov1 - ov0
 
-        if L > 0:
+        if L > 0 and not self.eval_mode:
             # build broadcastable z-index and weights lazily
             if self.use_gpu:
                 z = da.from_array(self.xp.arange(Z_len, dtype=self.xp.int32))[None, :, None, None]
@@ -354,10 +365,77 @@ class VirtualFuseArray:
         else:
             fused = base_sum
 
+        # if L == 0:
+        #     if getattr(self, "seam_sigma_px", None):
+        #         # Helper to make a (1, Z_len, 1, 1) z-index lazily
+        #         if self.use_gpu:
+        #             z_axis = da.from_array(self.xp.arange(Z_len, dtype=self.xp.int32))[None, :, None, None]
+        #         else:
+        #             z_axis = da.arange(Z_len, dtype=np.int32)[None, :, None, None]
+        #
+        #         # CASE A: zero overlap (but contiguous) -> feather across a small symmetric window centered at the joins
+        #         sz, sy, sx = self.seam_sigma_px
+        #         seam_thickness = int(max(1, 3 * sz))
+        #         join = (ov0 + ov1) // 2
+        #         s = max(0, join - seam_thickness)
+        #         e = min(Z_len, join + seam_thickness)
+        #         if e > s:
+        #             region = fused[:, s:e, :, :]
+        #             # Convert CuPy -> NumPy if needed (scipy.ndimage doesn't run on GPU)
+        #             # apply 3D Gaussian within this local slab
+        #             if self.use_gpu:
+        #                 region_np = region.get()
+        #                 region_np = gaussian_filter(region_np, sigma=(0, sz, sy, sx))
+        #                 region = self.xp.asarray(region_np)
+        #             else:
+        #                 region = gaussian_filter(region, sigma=(0, sz, sy, sx))
+        #
+        #             fused[:, s:e] = region
+
+            # CASE B: negative overlap (a small gap) -> fill the gap by interpolating between edge slices
+            # Ref ends before mov starts: gap = [r_out_z1, m_out_z0)
+            # if r_out_z1 < m_out_z0:
+            #     gap_s, gap_e = r_out_z1, m_out_z0
+            #     G = gap_e - gap_s
+            #     if G > 0:
+            #         # Take boundary planes (C,1,Y,X)
+            #         # left edge from ref at z=r_out_z1-1, right edge from mov at z=m_out_z0
+            #         ref_edge = ref_canvas[:, r_out_z1 - 1:r_out_z1] if r_out_z1 > 0 else da.zeros(
+            #             (C_len, 1, Y_len, X_len), dtype=np.float32)
+            #         mov_edge = mov_canvas[:, m_out_z0:m_out_z0 + 1] if m_out_z0 < Z_len else da.zeros(
+            #             (C_len, 1, Y_len, X_len), dtype=np.float32)
+            #         # broadcast linearly across the gap
+            #         w_gap = (self.xp.linspace(0.0, 1.0, G, dtype=self.xp.float32)[None, :, None, None])
+            #         w_gap = da.from_array(w_gap) if not isinstance(w_gap, da.Array) else w_gap
+            #         gap_fill = (1.0 - w_gap) * ref_edge + w_gap * mov_edge
+            #         fused = da.concatenate([fused[:, :gap_s], gap_fill, fused[:, gap_e:]], axis=1)
+            #
+            # # Mirror of Case B: mov ends before ref starts
+            # if m_out_z1 < r_out_z0:
+            #     gap_s, gap_e = m_out_z1, r_out_z0
+            #     G = gap_e - gap_s
+            #     if G > 0:
+            #         mov_edge = mov_canvas[:, m_out_z1 - 1:m_out_z1] if m_out_z1 > 0 else da.zeros(
+            #             (C_len, 1, Y_len, X_len), dtype=np.float32)
+            #         ref_edge = ref_canvas[:, r_out_z0:r_out_z0 + 1] if r_out_z0 < Z_len else da.zeros(
+            #             (C_len, 1, Y_len, X_len), dtype=np.float32)
+            #         w_gap = (self.xp.linspace(0.0, 1.0, G, dtype=self.xp.float32)[None, :, None, None])
+            #         w_gap = da.from_array(w_gap) if not isinstance(w_gap, da.Array) else w_gap
+            #         gap_fill = (1.0 - w_gap) * mov_edge + w_gap * ref_edge
+            #         fused = da.concatenate([fused[:, :gap_s], gap_fill, fused[:, gap_e:]], axis=1)
+
         # final crop to the requested fused ROI
+        # Apply any requested slicing
         fused = fused[:, zf_slice, yf_slice, xf_slice]
-        out = fused.compute()
-        out = self.xp.asarray(out, dtype=self.dtype)
+
+        # Trigger compute if Dask array
+        if hasattr(fused, "compute"):
+            out = fused.compute()
+        else:
+            out = fused
+
+        # Final cast to dtype and return
+        # out = np.asarray(out, dtype=self.dtype)
         return out
 
     # ---------------- Indexing ---------------- #
@@ -378,7 +456,14 @@ class VirtualFuseArray:
         z_sel, y_sel, x_sel = key[2], key[3], key[4]
         frames = [self._fuse_time_roi(t, c_sel, z_sel, y_sel, x_sel) for t in t_idx]
         xp = self.xp
-        out = xp.stack(frames, axis=0)
+
+        # ensure homogeneous backend before stacking
+        if self.use_gpu:
+            out = self.xp.stack(frames, axis=0)
+            out = np.asarray(out.get(), dtype=self.dtype)
+        else:
+            out = np.stack(frames, axis=0)
+
         if squeeze_t:
             out = out[0]
         if out.ndim >= 4 and out.shape[-4] == 1:

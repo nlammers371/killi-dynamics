@@ -11,13 +11,17 @@ import skimage as ski
 from scipy.interpolate import interp1d
 import statsmodels.api as sm
 from tqdm import tqdm
-
+import zarr
+from types import SimpleNamespace
 from src.data_io.zarr_utils import open_experiment_array
 
-def estimate_li_thresh(
-    root: Path | str,
-    project_name: str,
-    interval: int = 125,
+
+# ------------------------------------------------------------------------- #
+# Core Li threshold estimation
+# ------------------------------------------------------------------------- #
+def estimate_li_thresholds_over_time(
+    image_zarr: zarr.Array,
+    interval: int = 25,
     nuclear_channel: int | None = None,
     tol: float | None = None,
     initial_guess: float | None = None,
@@ -25,19 +29,16 @@ def estimate_li_thresh(
     last_i: int | None = None,
     timeout: float = 60 * 6,
     use_subsample: bool = False,
-):
-    """Estimate Li thresholds on a coarse grid for a project."""
-    root = Path(root)
-    out_directory = root / "built_data" / "mask_stacks" / "li_segmentation"
-    out_directory.mkdir(exist_ok=True, parents=True)
-
-    image_zarr, _store_path, _resolved_side = open_experiment_array(root, project_name)
+) -> pd.DataFrame:
+    """Estimate Li thresholds across timepoints on a coarse grid."""
     channel_list = image_zarr.attrs["channels"]
     multichannel_flag = len(channel_list) > 1
     if nuclear_channel is None:
         if multichannel_flag:
             nuclear_channel = [
-                i for i in range(len(channel_list)) if ("H2B" in channel_list[i]) or ("nls" in channel_list[i])
+                i
+                for i in range(len(channel_list))
+                if ("H2B" in channel_list[i].upper()) or ("NLS" in channel_list[i].upper())
             ][0]
         else:
             nuclear_channel = 0
@@ -59,7 +60,7 @@ def estimate_li_thresh(
         try:
             _, li_thresh = func_timeout(
                 timeout,
-                calculate_li_thresh,
+                compute_li_threshold_single_frame,
                 args=(image_array, use_subsample, tol, initial_guess),
             )
             li_vec.append(li_thresh)
@@ -69,20 +70,19 @@ def estimate_li_thresh(
 
     li_df_raw = pd.DataFrame(frame_vec, columns=["frame"])
     li_df_raw["li_thresh"] = li_vec
-
-    li_df_raw.to_csv(out_directory / f"{project_name}_li_df.csv", index=False)
-
     return li_df_raw
 
 
-def extract_random_quadrant(vol: np.ndarray, seed: Optional[int] = None) -> np.ndarray:
+# ------------------------------------------------------------------------- #
+# Utility functions
+# ------------------------------------------------------------------------- #
+def sample_random_quadrant(vol: np.ndarray, seed: Optional[int] = None) -> np.ndarray:
     """Return a random quadrant in the YX plane of a ZYX stack."""
     if seed is not None:
         np.random.seed(seed)
 
     z, y, x = vol.shape
     half_y, half_x = y // 2, x // 2
-
     quadrant = np.random.choice(4)
 
     if quadrant == 0:  # top-left
@@ -94,7 +94,10 @@ def extract_random_quadrant(vol: np.ndarray, seed: Optional[int] = None) -> np.n
     return vol[:, half_y:, half_x:]
 
 
-def calculate_li_thresh(
+# ------------------------------------------------------------------------- #
+# Per-frame Li threshold computation
+# ------------------------------------------------------------------------- #
+def compute_li_threshold_single_frame(
     image: np.ndarray,
     use_subsample: bool = False,
     tol: Optional[float] = None,
@@ -102,8 +105,8 @@ def calculate_li_thresh(
     LoG_sigma: float = 1,
     gauss_sigma: Optional[Sequence[float]] = None,
     thresh_li: Optional[float] = None,
-):
-    """Estimate a Li threshold for a denoised volume."""
+) -> tuple[np.ndarray, float]:
+    """Estimate a Li threshold for a single 3D volume."""
     if gauss_sigma is None:
         gauss_sigma = (1.33, 4, 4)
 
@@ -118,7 +121,7 @@ def calculate_li_thresh(
     if thresh_li is None:
         working = data_log_i
         if use_subsample:
-            working = extract_random_quadrant(working)  # downsample
+            working = sample_random_quadrant(working)
         if initial_guess is None:
             initial_guess = ski.filters.threshold_otsu(working)
         if tol is not None:
@@ -128,46 +131,31 @@ def calculate_li_thresh(
     return data_log_i, thresh_li
 
 
-def calculate_li_trend(
-    root: Path | str,
-    project_prefix: str,
+# ------------------------------------------------------------------------- #
+# Temporal smoothing and interpolation
+# ------------------------------------------------------------------------- #
+def smooth_li_threshold_trend(
+    mask_store_path: Path,
+    image_store_path: Path,
     first_i: int = 0,
     last_i: Optional[int] = None,
-    multiside_experiment: bool = True,
 ) -> pd.DataFrame:
-
-    """Smooth Li-threshold estimates across time for a project."""
-    root = Path(root)
-    mask_root = root / "built_data" / "mask_stacks" / "li_segmentation"
-    thresh_files = list(mask_root.glob(f"{project_prefix}*_li_df.csv"))
-    s1_flag = np.any(["side1" in f.name for f in thresh_files])
-    s2_flag = np.any(["side2" in f.name for f in thresh_files])
-    multiside_experiment = s1_flag | s2_flag
+    """Smooth Li-threshold estimates across time using LOWESS interpolation."""
+    thresh_dir = mask_store_path / "thresholds"
+    thresh_files = list(thresh_dir.glob("*li_df.csv"))
     manual_flag = np.any(["_manual" in f.name for f in thresh_files])
 
-    # first the base case
-    if not multiside_experiment and not manual_flag:
-        li_df = pd.read_csv(mask_root / f"{project_prefix}_li_df.csv")
-    elif not multiside_experiment and manual_flag:
-        manual_path = mask_root / f"{project_prefix}_li_df_manual.csv"
+    # base case
+    if not manual_flag:
+        li_df = pd.read_csv(thresh_dir / "li_df.csv")
+    else:
+        manual_path = thresh_dir / "li_df_manual.csv"
         li_df = pd.read_csv(manual_path)
-    elif multiside_experiment and not manual_flag:
-        li_df1 = pd.read_csv(mask_root / f"{project_prefix}_side1_li_df.csv")
-        li_df2 = pd.read_csv(mask_root / f"{project_prefix}_side2_li_df.csv")
-        li_df = pd.concat([li_df1, li_df2], axis=0, ignore_index=True).sort_values(by="frame")
-    elif multiside_experiment and manual_flag:
-        manual_path1 = mask_root / f"{project_prefix}_side1_li_df_manual.csv"
-        manual_path2 = mask_root / f"{project_prefix}_side2_li_df_manual.csv"
-        li_df1 = pd.read_csv(manual_path1)
-        li_df2 = pd.read_csv(manual_path2)
-        li_df = pd.concat([li_df1, li_df2], axis=0, ignore_index=True).sort_values(by="frame")
 
     if last_i is None:
-        side_hint: Optional[str | Sequence[str]] = None
-        if multiside_experiment:
-            side_hint = ["side1", "side_00", "side0"]
-        image_store, _store_path, _ = open_experiment_array(root, project_prefix, side=side_hint)
-        last_i = image_store.shape[0]
+        image_store = zarr.open_group(image_store_path, mode="r")
+        image_zarr = image_store["side_00"]
+        last_i = image_zarr.shape[0]
 
     x = li_df["frame"].to_numpy()
     y = li_df["li_thresh"].to_numpy()
@@ -189,17 +177,66 @@ def calculate_li_trend(
 
     li_df_full = pd.DataFrame(frames_full, columns=["frame"])
     li_df_full["li_thresh"] = thresh_predictions
-
-    if not multiside_experiment:
-        out_path = mask_root / f"{project_prefix}_li_thresh_trend.csv"
-        li_df_full.to_csv(out_path, index=False)
-    else:
-        for side in ("side1", "side2"):
-            out_path = mask_root / f"{project_prefix}_{side}_li_thresh_trend.csv"
-            li_df_full.to_csv(out_path, index=False)
-
+    li_df_full.to_csv(thresh_dir / "li_thresh_trend.csv", index=False)
     return li_df_full
 
 
-__all__ = ["extract_random_quadrant", "calculate_li_thresh", "calculate_li_trend"]
+# ------------------------------------------------------------------------- #
+# Main entry point
+# ------------------------------------------------------------------------- #
+def run_li_threshold_pipeline(root: Path | str, project_name: str, overwrite_flag: bool = False) -> pd.DataFrame:
+    """Run full Li threshold estimation + smoothing pipeline for a project."""
+    root = Path(root)
+    mask_store_path = root / "built_data" / "mask_stacks" / "li_segmentation" / f"{project_name}masks.zarr"
+    image_store_path = root / "built_data" / "zarr_image_files" / f"{project_name}.zarr"
 
+    image_array, _store_path, resolved_side = open_experiment_array(root, project_name)
+    side_specs = [SimpleNamespace(**spec) for spec in image_array.attrs["sides"]]
+
+    # initialize mask store
+    mode = "a"
+    root_group = zarr.open_group(str(mask_store_path), mode=mode)
+    root_group.attrs.update(
+        {
+            "project_name": project_name,
+            "sides": [
+                {
+                    "name": spec.name,
+                    "file_prefix": spec.file_prefix,
+                    "scene_index": spec.scene_index,
+                    "source_type": spec.source_type,
+                }
+                for spec in side_specs
+            ],
+        }
+    )
+
+    # ensure thresholds directory exists
+    thresh_dir = Path(mask_store_path) / "thresholds"
+    thresh_dir.mkdir(exist_ok=True)
+
+    # coarse Li estimation
+    li_df_raw = estimate_li_thresholds_over_time(
+        image_array,
+        interval=25,
+        nuclear_channel=None,
+        tol=None,
+        initial_guess=None,
+        start_i=0,
+        last_i=None,
+        timeout=60 * 6,
+        use_subsample=True,
+    )
+
+    li_df_raw.to_csv(thresh_dir / "li_thresh_raw.csv", index=False)
+    li_df_smoothed = smooth_li_threshold_trend(mask_store_path, image_store_path)
+    return li_df_smoothed
+
+
+__all__ = [
+    "sample_random_quadrant",
+    "compute_li_threshold_single_frame",
+    "smooth_li_threshold_trend",
+    "estimate_li_thresholds_over_time",
+    "run_li_threshold_pipeline",
+]

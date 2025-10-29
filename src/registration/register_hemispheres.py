@@ -100,7 +100,8 @@ def get_hemisphere_shifts(zarr_root: Path, ref_side: str = "side_00", mov_side: 
     shift_df.to_csv(csv_path, index=False)
 
     # ---- UPDATE MOVING SIDE ATTRS ----
-    mov_group = zarr.open_group(mov_path, mode="r+")
+    store = zarr.open(zarr_root, mode="a")
+    mov_group = store[mov_side]
     mov_attrs = dict(mov_group.attrs.asdict())
     mov_attrs.setdefault("dim_order", "TCZYX")
     mov_attrs["rigid_transform"] = {
@@ -110,7 +111,7 @@ def get_hemisphere_shifts(zarr_root: Path, ref_side: str = "side_00", mov_side: 
     mov_group.attrs.update(mov_attrs)
 
     # ---- UPDATE REFERENCE SIDE ATTRS ----
-    ref_group = zarr.open_group(ref_path, mode="r+")
+    ref_group = store[ref_side]
     ref_attrs = dict(ref_group.attrs.asdict())
     ref_attrs.setdefault("dim_order", "TCZYX")
     ref_attrs["rigid_transform"] = {
