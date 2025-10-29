@@ -22,10 +22,8 @@ FUSED_ALIASES: tuple[str, ...] = ("fused", "fusion", "fused_image")
 import zarr
 from pathlib import Path
 from typing import Optional, Any, Dict, Literal
-import shutil
-import numpy as np
-import pandas as pd
-from typing import Union
+from src.registration.virtual_fusion import VirtualFuseArray
+from src.data_io.legacy_helpers import (_parse_legacy_suffix, DEFAULT_SIDE_NAMES, _side_aliases, _dedupe)
 
 def get_metadata(
     root: Path | str,
@@ -74,41 +72,6 @@ def get_metadata(
     # If nothing found, return empty dict
     return {}
 
-def _side_aliases(index: int) -> list[str]:
-    """Return a list of plausible group names for a given side index."""
-
-    aliases = [
-        f"side_{index:02d}",
-        f"side{index:02d}",
-        f"side_{index}",
-        f"side{index}",
-    ]
-
-    if 0 <= index < 26:
-        suffix = chr(ord("a") + index)
-        aliases.extend([
-            f"side_{suffix}",
-            f"side{suffix}",
-        ])
-
-    return aliases
-
-
-DEFAULT_SIDE_NAMES: tuple[str, ...] = tuple(
-    name for idx in range(4) for name in _side_aliases(idx)
-)
-
-
-def _dedupe(sequence: Iterable[str]) -> list[str]:
-    seen: set[str] = set()
-    output: list[str] = []
-    for item in sequence:
-        key = item.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        output.append(item)
-    return output
 
 
 def _first_array(node: zarr.Group | zarr.Array) -> Optional[zarr.Array]:
@@ -157,30 +120,6 @@ def _expand_side_candidates(side: str | int | Sequence[str | int]) -> list[str]:
             candidates.extend(_side_aliases(index))
 
     return _dedupe(candidates)
-
-
-def _parse_legacy_suffix(project_name: str) -> tuple[str, list[str]]:
-    """Split a legacy ``*_sideX``/``*_fused`` name into base and aliases."""
-
-    side_match = re.search(r"^(.*)_side[_-]?(\d+)$", project_name, flags=re.IGNORECASE)
-    if side_match:
-        base = side_match.group(1)
-        index = int(side_match.group(2))
-        indices: list[int] = []
-        if index > 0:
-            indices.append(index - 1)
-        indices.append(index)
-        aliases: list[str] = []
-        for idx in indices:
-            aliases.extend(_side_aliases(idx))
-        return base, _dedupe(aliases)
-
-    fused_match = re.search(r"^(.*)_(fused|fusion)$", project_name, flags=re.IGNORECASE)
-    if fused_match:
-        base = fused_match.group(1)
-        return base, list(FUSED_ALIASES)
-
-    return project_name, []
 
 
 def open_image_array(
@@ -247,222 +186,99 @@ def open_image_array(
     )
 
 
+def _gpu_available() -> bool:
+    """Return True if a working CUDA GPU is available via CuPy."""
+    try:
+        import cupy as cp
+        return cp.cuda.runtime.getDeviceCount() > 0
+    except Exception:
+        return False
+
+
 def open_experiment_array(
     root: Path | str,
     project_name: str,
     *,
-    side: str | int | Sequence[str | int] | None = None,
-    prefer_fused: bool = False,
-) -> Tuple[zarr.Array, Path, Optional[str]]:
-    """Open a project's image array, resolving legacy naming automatically."""
-
-    root = Path(root)
-    store_dir = root / "built_data" / "zarr_image_files"
-
-    direct_path = store_dir / f"{project_name}.zarr"
-    candidate_names = _expand_side_candidates(side)
-
-    if direct_path.exists():
-        array, group_name = open_image_array(direct_path, candidates=candidate_names, prefer_fused=prefer_fused)
-        return array, direct_path, group_name
-
-    base_name, legacy_candidates = _parse_legacy_suffix(project_name)
-    store_path = store_dir / f"{base_name}.zarr"
-    if not store_path.exists():
-        raise FileNotFoundError(f"Could not locate a Zarr store for '{project_name}' at {store_path}")
-
-    all_candidates = candidate_names + legacy_candidates
-    array, group_name = open_image_array(store_path, candidates=all_candidates, prefer_fused=prefer_fused)
-    return array, store_path, group_name
-
-
-def merge_zarr_sides(
-    side1_path: Path | str,
-    side2_path: Path | str,
-    out_store_path: Path | str,
-    project_name: Optional[str] = None,
-    overwrite: bool = False,
-) -> Path:
+    side: str | None = None,
+    prefer_fused: bool = True,
+    use_gpu: bool | None = None,
+    mode: str = "r",
+) -> Tuple[zarr.Array | VirtualFuseArray, Path, Optional[str]]:
     """
-    Combine two legacy per-side Zarr stores into a single multi-side store
-    matching the layout expected by `export_czi_to_zarr()`.
+    Open a project's image array, resolving legacy naming automatically.
+
+    Extended version:
+      • Automatically detects and loads fused or two-sided experiments.
+      • Uses GPU-backed VirtualFuseArray when available.
+      • Backward-compatible: returns same (array, store_path, group_name) tuple.
 
     Parameters
     ----------
-    side1_path : Path or str
-        Path to the first side Zarr store (e.g. 'side1.zarr').
-    side2_path : Path or str
-        Path to the second side Zarr store (e.g. 'side2.zarr').
-    out_store_path : Path or str
-        Destination for the unified multi-side store (e.g. 'myproject.zarr').
-    project_name : str, optional
-        Name to record in the root Zarr attributes. If None, inferred from out_store_path.
-    overwrite : bool, default=False
-        Whether to overwrite an existing destination.
+    root : Path | str
+        Root project directory containing built_data/zarr_image_files.
+    project_name : str
+        Base name of the dataset (without .zarr).
+    side : str | int | Sequence[str | int] | None
+        Side selection override (legacy).
+    prefer_fused : bool
+        If True, prefer a persistent fused group if it exists.
+    use_gpu : bool | None
+        Whether to enable GPU acceleration. If None, autodetect.
+    mode : str
+        Open mode for zarr.open_group (default: "r").
 
     Returns
     -------
-    Path
-        Path to the new combined store.
+    array : zarr.Array | VirtualFuseArray
+    store_path : Path
+    group_name : Optional[str]
     """
-    side1_path = Path(side1_path)
-    side2_path = Path(side2_path)
-    out_store_path = Path(out_store_path)
 
-    if out_store_path.exists():
-        if not overwrite:
-            raise FileExistsError(f"{out_store_path} already exists. Use overwrite=True to replace it.")
-        shutil.rmtree(out_store_path)
+    # get path to store
+    root = Path(root)
+    image_dir = root / "built_data" / "zarr_image_files"
+    store_dir = image_dir / f"{project_name}.zarr"
 
-    # Create parent group
-    root = zarr.open_group(str(out_store_path), mode="w")
+    # if a specific side is requested, return it
+    if side is not None:
+        zarr_array = store_dir[side]
+        return zarr_array, store_dir, side
 
-    # Copy side directories into subgroups
-    side_map = [("side_00", side1_path), ("side_01", side2_path)]
-    for side_name, src in side_map:
-        dst = out_store_path / side_name
-        shutil.move(src, dst)
-        print(f"✅ Copied {src} → {dst}")
+    # --- 3️⃣ Autodetect GPU if not specified ---
+    if use_gpu is None:
+        use_gpu = _gpu_available()
+        # print(f"GPU autodetect: {'found' if use_gpu else 'not found'}")
 
-    # Fill in minimal metadata at the root
-    if project_name is None:
-        project_name = out_store_path.stem
+    # --- 4️⃣ Try persistent fused group first ---
+    root_group = zarr.open_group(store_dir, mode=mode)
+    if prefer_fused and "fused" in root_group:
+        print(f"[open_experiment_array] Using persistent fused array at {store_dir}/fused")
+        return root_group["fused"], store_dir, "fused"
 
-    sides_metadata = [
-        {"name": name, "file_prefix": None, "scene_index": None, "source_type": "legacy"}
-        for name, _ in side_map
-    ]
+    # --- 5️⃣ Detect two-sided structure ---
+    side_keys = sorted([k for k in root_group.array_keys() if k.startswith("side_")])
+    if {"side_00", "side_01"}.issubset(side_keys):
+        interp = "linear" if use_gpu else "nearest"
+        print(
+            f"[open_experiment_array] Two-sided experiment detected → "
+            f"VirtualFuseArray(interp='{interp}', backend={'GPU' if use_gpu else 'CPU'})"
+        )
+        vf = VirtualFuseArray(store_dir, use_gpu=use_gpu, interp=interp)
+        return vf, store_dir, "virtual_fused"
 
-    root.attrs.update({
-        "project_name": project_name,
-        "sides": sides_metadata,
-    })
+    # --- 6️⃣ Otherwise fall back to standard side loading ---
+    array = root_group[side_keys[0]]
+    print(
+        f"[open_experiment_array] Loading first available side '{side_keys[0]}' from {store_dir}"
+    )
 
-    # check and update metadata as needed
-    for side_name, _ in side_map:
-        attrs = dict(root[side_name].attrs)
+    return array, store_dir, side_keys[0]
 
-        # Convert voxel sizes
-        if all(k in attrs for k in ("PhysicalSizeZ", "PhysicalSizeY", "PhysicalSizeX")):
-            try:
-                voxel_tuple = (
-                    float(attrs["PhysicalSizeZ"]),
-                    float(attrs["PhysicalSizeY"]),
-                    float(attrs["PhysicalSizeX"]),
-                )
-                attrs["voxel_size_um"] = voxel_tuple
-            except (ValueError, TypeError):
-                pass  # skip malformed entries
-
-        # Rename and normalize legacy fields
-        if "TimeRes" in attrs:
-            attrs["time_resolution_s"] = float(attrs.pop("TimeRes"))
-        if "Channels" in attrs:
-            attrs["channels"] = [str(ch) for ch in attrs.pop("Channels")]
-        if "DimOrder" in attrs:
-            attrs["dim_order"] = str(attrs.pop("DimOrder"))
-
-        # Ensure required fields
-        attrs.setdefault("n_time_points", int(root[side_name].shape[0]))
-        attrs["side_name"] = side_name
-        for key in ("raw_voxel_scale_um", "source_file", "scene_index"):
-            attrs.setdefault(key, None)
-
-        # Commit changes
-        root[side_name].attrs.update(attrs)
-
-
-    print(f"✅ Created unified multi-side store: {out_store_path}")
-    return out_store_path
-
-
-def convert_shift_table_to_transform_attrs(
-    fused_store_path: Path | str,
-    shift_csv_path: Path | str,
-    moving_side: Literal["side_00", "side_01"] = "side_01",
-    reference_side: Literal["side_00", "side_01"] = "side_00",
-    flips_moving=(True, False, True),
-    overwrite_existing: bool = True,
-) -> None:
-    """
-    Convert a legacy per-frame shift CSV into new-style rigid_transform metadata,
-    saving the shift table in a dedicated 'registration' directory.
-
-    Layout:
-        project_fused.zarr/
-        ├── side_00/
-        ├── side_01/
-        ├── registration/
-        │     ├── shifts_side_01.csv
-        └── .zattrs
-
-    Parameters
-    ----------
-    fused_store_path : Path or str
-        Path to the unified multi-side Zarr store.
-    shift_csv_path : Path or str
-        CSV with columns ['frame','zs','ys','xs'] from registration.
-    moving_side : str
-        Name of the moving side (default: 'side_01').
-    reference_side : str
-        Name of the fixed reference side (default: 'side_00').
-    flips_moving : tuple(bool,bool,bool)
-        Axis-wise flips for the moving side.
-    overwrite_existing : bool
-        Overwrite existing rigid_transform attributes if present.
-    """
-    fused_store_path = Path(fused_store_path)
-    shift_csv_path = Path(shift_csv_path)
-
-    # Load the store
-    root = zarr.open_group(fused_store_path, mode="a")
-
-    # Load shift data
-    df = pd.read_csv(shift_csv_path)
-    required_cols = {"frame", "zs", "ys", "xs"}
-    if not required_cols.issubset(df.columns):
-        raise ValueError(f"Shift CSV must contain columns {required_cols}")
-
-    # --- Create registration subdir and write shift table there ---
-    reg_dir = fused_store_path / "registration"
-    reg_dir.mkdir(exist_ok=True)
-
-    reg_csv_path = reg_dir / f"shifts_{moving_side}.csv"
-    df.to_csv(reg_csv_path, index=False)
-    print(f"✅ Saved per-frame shift table → {reg_csv_path}")
-
-    # --- Rotation matrices ---
-    R_ref = np.eye(3)
-    R_mov = np.diag([(-1 if f else 1) for f in flips_moving])
-
-    # --- Attribute dictionaries ---
-    ref_attrs = {
-        "reference_frame": "fused",
-        "rotation": R_ref.tolist(),
-        "flip": [False, False, False],
-        "per_frame_shifts": None,
-    }
-
-    mov_attrs = {
-        "reference_frame": "fused",
-        "rotation": R_mov.tolist(),
-        "flip": list(flips_moving),
-        "per_frame_shifts": str(reg_csv_path.relative_to(fused_store_path)),
-    }
-
-    # --- Write back to Zarr attrs ---
-    if overwrite_existing or "rigid_transform" not in root[reference_side].attrs:
-        root[reference_side].attrs["rigid_transform"] = ref_attrs
-    if overwrite_existing or "rigid_transform" not in root[moving_side].attrs:
-        root[moving_side].attrs["rigid_transform"] = mov_attrs
-
-    print(f"✅ Updated rigid_transform attrs for {reference_side} and {moving_side}")
 
 
 __all__ = [
     "open_image_array",
     "open_experiment_array",
-    "get_metadata",
-    "merge_zarr_sides",
+    "get_metadata"
 ]
 

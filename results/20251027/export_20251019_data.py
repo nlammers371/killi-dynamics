@@ -18,5 +18,5 @@ if __name__ == '__main__':
         n_workers=n_workers,
         channel_names=channel_names,
         tres=tres,
-        overwrite_flag=True,
-        )
+        overwrite_flag=False,
+        register_two_sided=False)
