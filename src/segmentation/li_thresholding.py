@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Optional, Sequence
-from func_timeout import FunctionTimedOut, func_timeout
 import numpy as np
 import pandas as pd
 import SimpleITK as sitk
@@ -14,68 +13,41 @@ from tqdm import tqdm
 import zarr
 from types import SimpleNamespace
 from src.data_io.zarr_utils import open_experiment_array
-
-
-# ------------------------------------------------------------------------- #
-# Core Li threshold estimation
-# ------------------------------------------------------------------------- #
-def estimate_li_thresholds_over_time(
-    image_zarr: zarr.Array,
-    interval: int = 25,
-    nuclear_channel: int | None = None,
-    tol: float | None = None,
-    initial_guess: float | None = None,
-    start_i: int = 0,
-    last_i: int | None = None,
-    timeout: float = 60 * 6,
-    use_subsample: bool = False,
-) -> pd.DataFrame:
-    """Estimate Li thresholds across timepoints on a coarse grid."""
-    channel_list = image_zarr.attrs["channels"]
-    multichannel_flag = len(channel_list) > 1
-    if nuclear_channel is None:
-        if multichannel_flag:
-            nuclear_channel = [
-                i
-                for i in range(len(channel_list))
-                if ("H2B" in channel_list[i].upper()) or ("NLS" in channel_list[i].upper())
-            ][0]
-        else:
-            nuclear_channel = 0
-
-    if last_i is None:
-        last_i = image_zarr.shape[0]
-
-    thresh_frames = np.arange(start_i, last_i, interval)
-    if len(thresh_frames) > 0:
-        thresh_frames[-1] = last_i - 1
-
-    li_vec = []
-    frame_vec = []
-    for time_int in tqdm(thresh_frames, "Estimating Li thresholds..."):
-        if multichannel_flag:
-            image_array = np.squeeze(image_zarr[time_int, nuclear_channel, :, :, :]).copy()
-        else:
-            image_array = np.squeeze(image_zarr[time_int, :, :, :]).copy()
-        try:
-            _, li_thresh = func_timeout(
-                timeout,
-                compute_li_threshold_single_frame,
-                args=(image_array, use_subsample, tol, initial_guess),
-            )
-            li_vec.append(li_thresh)
-            frame_vec.append(time_int)
-        except FunctionTimedOut:
-            print(f"Function timed out for time: {time_int}")
-
-    li_df_raw = pd.DataFrame(frame_vec, columns=["frame"])
-    li_df_raw["li_thresh"] = li_vec
-    return li_df_raw
-
+from concurrent.futures import ProcessPoolExecutor, as_completed, TimeoutError
 
 # ------------------------------------------------------------------------- #
 # Utility functions
 # ------------------------------------------------------------------------- #
+def sample_random_block_xy(vol: np.ndarray, seed: Optional[int] = None) -> np.ndarray:
+    """
+    Return a random quadrant-sized subvolume in the YX plane of a ZYX stack.
+    That is, a crop with dimensions (Z, Y/2, X/2) from any valid position.
+
+    Parameters
+    ----------
+    vol : np.ndarray
+        3D array (Z, Y, X)
+    seed : int, optional
+        Random seed for reproducibility.
+
+    Returns
+    -------
+    np.ndarray
+        Random subvolume with shape (Z, Y//2, X//2)
+    """
+    if seed is not None:
+        np.random.seed(seed)
+
+    z, y, x = vol.shape
+    crop_y, crop_x = y // 3, x // 3
+
+    # choose any valid top-left corner for a quadrant-sized crop
+    y0 = np.random.randint(0, y - crop_y + 1)
+    x0 = np.random.randint(0, x - crop_x + 1)
+
+    return vol[:, y0:y0 + crop_y, x0:x0 + crop_x]
+
+
 def sample_random_quadrant(vol: np.ndarray, seed: Optional[int] = None) -> np.ndarray:
     """Return a random quadrant in the YX plane of a ZYX stack."""
     if seed is not None:
@@ -121,7 +93,7 @@ def compute_li_threshold_single_frame(
     if thresh_li is None:
         working = data_log_i
         if use_subsample:
-            working = sample_random_quadrant(working)
+            working = sample_random_block_xy(working)
         if initial_guess is None:
             initial_guess = ski.filters.threshold_otsu(working)
         if tol is not None:
@@ -130,6 +102,172 @@ def compute_li_threshold_single_frame(
             thresh_li = ski.filters.threshold_li(working, initial_guess=initial_guess)
     return data_log_i, thresh_li
 
+
+# ------------------------------------------------------------------------- #
+# Core Li threshold estimation
+# ------------------------------------------------------------------------- #
+
+def _li_thresh_worker(args):
+    """Worker that opens Zarr inside the subprocess."""
+    (
+        time_int,
+        root,
+        project_name,
+        side_names,
+        nuclear_channel,
+        multichannel_flag,
+        use_subsample,
+        tol,
+        initial_guess,
+    ) = args
+
+    # open fresh in the subprocess
+    if len(side_names) > 1:
+        # randomly pick a side if multiple exist
+        side_choice = np.random.choice(side_names)
+    else:
+        side_choice = side_names[0]
+    image_zarr, _, _ = open_experiment_array(root, project_name, side=side_choice)
+
+    # extract the volume
+    if multichannel_flag:
+        image_array = np.squeeze(image_zarr[time_int, nuclear_channel]).copy()
+    else:
+        image_array = np.squeeze(image_zarr[time_int]).copy()
+
+    # compute Li threshold
+    _, li_thresh = compute_li_threshold_single_frame(image_array, use_subsample, tol, initial_guess)
+    return time_int, li_thresh
+
+
+def estimate_li_thresholds_over_time(
+    image_zarr: zarr.Array,
+    interval: int = 25,
+    nuclear_channel: int | None = None,
+    tol: float | None = None,
+    initial_guess: float | None = None,
+    start_i: int = 0,
+    last_i: int | None = None,
+    timeout: float = 60 * 6,
+    use_subsample: bool = False,
+    n_workers: int = 8,
+) -> pd.DataFrame:
+    """Estimate Li thresholds across timepoints on a coarse grid, parallelized with per-frame timeout."""
+
+    # --- infer context ---
+    zarr_path = Path(image_zarr.store_path)
+    root = zarr_path.parent.parent.parent
+    project_name = zarr_path.name.replace(".zarr", "")
+    # group_key = image_zarr.name.split("/")[0]  # e.g. "side_00" or "fused"
+    channel_list = image_zarr.attrs["channels"]
+    multichannel_flag = len(channel_list) > 1
+    side_names = [s["name"] for s in image_zarr.attrs["sides"]]
+
+    if nuclear_channel is None:
+        if multichannel_flag:
+            nuclear_channel = next(
+                i for i, ch in enumerate(channel_list)
+                if ("H2B" in ch.upper()) or ("NLS" in ch.upper())
+            )
+        else:
+            nuclear_channel = 0
+
+    if last_i is None:
+        last_i = image_zarr.shape[0]
+
+    thresh_frames = np.arange(start_i, last_i, interval)
+    if len(thresh_frames) > 0:
+        thresh_frames[-1] = last_i - 1
+
+    li_vec, frame_vec = [], []
+
+    with ProcessPoolExecutor(max_workers=n_workers) as executor:
+        futures = {
+            executor.submit(
+                _li_thresh_worker,
+                (
+                    t,
+                    root,
+                    project_name,
+                    side_names,
+                    nuclear_channel,
+                    multichannel_flag,
+                    use_subsample,
+                    tol,
+                    initial_guess,
+                ),
+            ): t
+            for t in thresh_frames
+        }
+
+        for future in tqdm(as_completed(futures), total=len(futures), desc="Estimating Li thresholds..."):
+            t = futures[future]
+            try:
+                result = future.result(timeout=timeout)
+                if result is not None:
+                    frame_vec.append(result[0])
+                    li_vec.append(result[1])
+            except TimeoutError:
+                print(f"Frame {t} timed out.")
+            except Exception as e:
+                print(f"Frame {t} failed: {e}")
+
+    li_df_raw = pd.DataFrame({"frame": frame_vec, "li_thresh": li_vec})
+    return li_df_raw
+
+
+# def estimate_li_thresholds_over_time(
+#     image_zarr: zarr.Array,
+#     interval: int = 25,
+#     nuclear_channel: int | None = None,
+#     tol: float | None = None,
+#     initial_guess: float | None = None,
+#     start_i: int = 0,
+#     last_i: int | None = None,
+#     timeout: float = 60 * 6,
+#     use_subsample: bool = False,
+# ) -> pd.DataFrame:
+#     """Estimate Li thresholds across timepoints on a coarse grid."""
+#     channel_list = image_zarr.attrs["channels"]
+#     multichannel_flag = len(channel_list) > 1
+#     if nuclear_channel is None:
+#         if multichannel_flag:
+#             nuclear_channel = [
+#                 i
+#                 for i in range(len(channel_list))
+#                 if ("H2B" in channel_list[i].upper()) or ("NLS" in channel_list[i].upper())
+#             ][0]
+#         else:
+#             nuclear_channel = 0
+#
+#     if last_i is None:
+#         last_i = image_zarr.shape[0]
+#
+#     thresh_frames = np.arange(start_i, last_i, interval)
+#     if len(thresh_frames) > 0:
+#         thresh_frames[-1] = last_i - 1
+#
+#     li_vec = []
+#     frame_vec = []
+#     for time_int in tqdm(thresh_frames, "Estimating Li thresholds..."):
+#         if multichannel_flag:
+#             image_array = np.squeeze(image_zarr[time_int, nuclear_channel, :, :, :]).copy()
+#         else:
+#             image_array = np.squeeze(image_zarr[time_int, :, :, :]).copy()
+#         try:
+#             _, li_thresh = func_timeout(
+#                 timeout,
+#                 compute_li_threshold_single_frame,
+#                 args=(image_array, use_subsample, tol, initial_guess),
+#             )
+#             li_vec.append(li_thresh)
+#             frame_vec.append(time_int)
+#         except FunctionTimedOut:
+#             print(f"Function timed out for time: {time_int}")
+#
+#     li_df_raw = pd.DataFrame(frame_vec, columns=["frame"])
+#     li_df_raw["li_thresh"] = li_vec
+#     return li_df_raw
 
 # ------------------------------------------------------------------------- #
 # Temporal smoothing and interpolation
@@ -147,9 +285,9 @@ def smooth_li_threshold_trend(
 
     # base case
     if not manual_flag:
-        li_df = pd.read_csv(thresh_dir / "li_df.csv")
+        li_df = pd.read_csv(thresh_dir / "li_thresh_raw.csv")
     else:
-        manual_path = thresh_dir / "li_df_manual.csv"
+        manual_path = thresh_dir / "li_thresh_manual.csv"
         li_df = pd.read_csv(manual_path)
 
     if last_i is None:
@@ -184,7 +322,13 @@ def smooth_li_threshold_trend(
 # ------------------------------------------------------------------------- #
 # Main entry point
 # ------------------------------------------------------------------------- #
-def run_li_threshold_pipeline(root: Path | str, project_name: str, overwrite_flag: bool = False) -> pd.DataFrame:
+def run_li_threshold_pipeline(root: Path | str,
+                              project_name: str,
+                              use_subsampling: bool = True,
+                              li_tol: Optional[float] = None,
+                              li_est_interval: int = 25,
+                              overwrite_flag: bool = False) -> pd.DataFrame:
+
     """Run full Li threshold estimation + smoothing pipeline for a project."""
     root = Path(root)
     mask_store_path = root / "built_data" / "mask_stacks" / "li_segmentation" / f"{project_name}masks.zarr"
@@ -213,22 +357,22 @@ def run_li_threshold_pipeline(root: Path | str, project_name: str, overwrite_fla
 
     # ensure thresholds directory exists
     thresh_dir = Path(mask_store_path) / "thresholds"
-    thresh_dir.mkdir(exist_ok=True)
-
-    # coarse Li estimation
-    li_df_raw = estimate_li_thresholds_over_time(
-        image_array,
-        interval=25,
-        nuclear_channel=None,
-        tol=None,
-        initial_guess=None,
-        start_i=0,
-        last_i=None,
-        timeout=60 * 6,
-        use_subsample=True,
-    )
-
-    li_df_raw.to_csv(thresh_dir / "li_thresh_raw.csv", index=False)
+    # thresh_dir.mkdir(exist_ok=True)
+    #
+    # # coarse Li estimation
+    # li_df_raw = estimate_li_thresholds_over_time(
+    #     image_array,
+    #     interval=li_est_interval,
+    #     nuclear_channel=None,
+    #     tol=li_tol,
+    #     initial_guess=None,
+    #     start_i=0,
+    #     last_i=None,
+    #     timeout=60 * 6,
+    #     use_subsample=use_subsampling,
+    # )
+    #
+    # li_df_raw.to_csv(thresh_dir / "li_thresh_raw.csv", index=False)
     li_df_smoothed = smooth_li_threshold_trend(mask_store_path, image_store_path)
     return li_df_smoothed
 

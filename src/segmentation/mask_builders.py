@@ -2,14 +2,17 @@
 from __future__ import annotations
 
 from typing import Sequence
-
+from pathlib import Path
+import zarr
 import numpy as np
 import pandas as pd
 from skimage.morphology import label
 from skimage import morphology
 from skimage.segmentation import watershed
 
-from src.segmentation.li_thresholding import calculate_li_thresh
+from src.segmentation.li_thresholding import compute_li_threshold_single_frame
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="pkg_resources")
 
 
 def do_hierarchical_watershed(
@@ -68,46 +71,41 @@ def do_hierarchical_watershed(
 
 def perform_li_segmentation(
     time_int: int,
-    li_df: pd.DataFrame,
-    image_zarr,
-    nuclear_channel: int,
-    multichannel_flag: bool,
-    mask_zarr,
+    thresh_range_table: pd.DataFrame,
+    image_zarr_path: str | Path,
+    mask_zarr_path: str | Path,
+    group_key: str,
+    nuclear_channel: int = None,
     preproc_flag: bool = True,
-    n_thresh: int = 5,
-    thresh_factors: Sequence[float] | None = None,
 ):
     """Segment a single timepoint using Li-threshold sweeping."""
-    if thresh_factors is None:
-        thresh_factors = [0.9, 1, 1.1] # conservative range unless otherwise specified
+    # --- open stores locally inside worker (avoid pickling open objects)
+    image_store = zarr.open_group(image_zarr_path, mode="r")
+    image_zarr = image_store[group_key]
+    mask_store = zarr.open_group(Path(mask_zarr_path) / group_key, mode="a")
+    # mask_zarr = mask_store[group_key]
 
-    li_thresh = li_df.loc[time_int, "li_thresh"]
-    if multichannel_flag:
+    # get thresh range
+    thresh_range = thresh_range_table.loc[thresh_range_table["frame"] == time_int, :].drop(
+                    columns=["frame", "li_thresh"]).to_numpy()[0]
+
+    if nuclear_channel is not None and image_zarr.ndim == 5:
         image_array = np.squeeze(image_zarr[time_int, nuclear_channel, :, :, :])
     else:
         image_array = np.squeeze(image_zarr[time_int, :, :, :])
 
     if np.any(image_array != 0):
         if preproc_flag:
-            data_log_i, thresh_li = calculate_li_thresh(image_array, thresh_li=li_thresh)
+            data_log_i, thresh_li = compute_li_threshold_single_frame(image_array, thresh_li=1) # use dummy thresh
         else:
-            data_log_i = image_array.copy()
-            thresh_li = li_thresh
+            data_log_i = image_array
+            # thresh_li = li_thresh
 
-        thresh_range = np.linspace(thresh_li * thresh_factors[0], thresh_factors[1] * thresh_li, n_thresh)
+        # thresh_range = np.linspace(thresh_li * thresh_factors[0], thresh_factors[1] * thresh_li, n_thresh)
         aff_mask, mask_stack = do_hierarchical_watershed(data_log_i, thresh_range=thresh_range)
 
-        mask_zarr["thresh_stack"][time_int] = mask_stack
-        mask_zarr["stitched"][time_int] = aff_mask
-
-        # Fetch safely with a default empty dict
-        thresh_levels = dict(mask_zarr.attrs.get("thresh_levels", {}))
-
-        # Update current timepoint (always stringify keys for JSON compatibility)
-        thresh_levels[str(int(time_int))] = list(map(float, thresh_range))
-
-        # Overwrite full dict back to the root attrs
-        mask_zarr.attrs["thresh_levels"] = thresh_levels
+        mask_store["thresh_stack"][time_int] = mask_stack
+        mask_store["stitched"][time_int] = aff_mask
 
         return 1
 

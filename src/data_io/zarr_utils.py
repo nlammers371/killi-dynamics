@@ -238,25 +238,33 @@ def open_experiment_array(
     root = Path(root)
     image_dir = root / "built_data" / "zarr_image_files"
     store_dir = image_dir / f"{project_name}.zarr"
+    root_group = zarr.open_group(store_dir, mode=mode)
+    side_keys = sorted([k for k in root_group.array_keys() if k.startswith("side_")])
+
+    if use_gpu is None:
+        use_gpu = _gpu_available()
 
     # if a specific side is requested, return it
     if side is not None:
-        zarr_array = store_dir[side]
-        return zarr_array, store_dir, side
+        if side in side_keys:
+            za = root_group[side]
+        elif side == "virtual_fused":
+            interp = "linear" if use_gpu else "nearest"
+            print(
+                f"[open_experiment_array] Two-sided experiment detected → "
+                f"VirtualFuseArray(interp='{interp}', backend={'GPU' if use_gpu else 'CPU'})"
+            )
+            za = VirtualFuseArray(store_dir, use_gpu=use_gpu, interp=interp)
+        return za, store_dir, side
 
-    # --- 3️⃣ Autodetect GPU if not specified ---
-    if use_gpu is None:
-        use_gpu = _gpu_available()
-        # print(f"GPU autodetect: {'found' if use_gpu else 'not found'}")
 
     # --- 4️⃣ Try persistent fused group first ---
-    root_group = zarr.open_group(store_dir, mode=mode)
+
     if prefer_fused and "fused" in root_group:
         print(f"[open_experiment_array] Using persistent fused array at {store_dir}/fused")
         return root_group["fused"], store_dir, "fused"
 
     # --- 5️⃣ Detect two-sided structure ---
-    side_keys = sorted([k for k in root_group.array_keys() if k.startswith("side_")])
     if {"side_00", "side_01"}.issubset(side_keys):
         interp = "linear" if use_gpu else "nearest"
         print(
