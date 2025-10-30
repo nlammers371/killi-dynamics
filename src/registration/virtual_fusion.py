@@ -14,11 +14,9 @@ try:
     import cupy as cp
     _DEFAULT_XP = cp
     _HAS_GPU = True
-    print("[VirtualFuseArray] Using CuPy backend.")
 except Exception:
     _DEFAULT_XP = np
     _HAS_GPU = False
-    print("[VirtualFuseArray] CuPy not found; using NumPy backend.")
 if _HAS_GPU:
     import cupy as cp
     from cupyx.scipy import ndimage as sp_nd
@@ -204,6 +202,12 @@ class VirtualFuseArray:
         return self.xp.asarray(arr) if self.use_gpu else arr
 
     def _fuse_time_roi(self, t, c_sel, zf_slice, yf_slice, xf_slice):
+
+        if _HAS_GPU:
+            print("[VirtualFuseArray] Using CuPy backend.")
+        else:
+            print("[VirtualFuseArray] CuPy not found; using NumPy backend.")
+
         xp = self.xp
         Zr, Yr, Xr = self._side_spatial(self.ref.shape, self.ref_meta)
         Zm, Ym, Xm = self._side_spatial(self.mov.shape, self.mov_meta)
