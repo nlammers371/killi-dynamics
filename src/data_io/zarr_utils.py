@@ -24,53 +24,55 @@ from pathlib import Path
 from typing import Optional, Any, Dict, Literal
 from src.registration.virtual_fusion import VirtualFuseArray
 from src.data_io.legacy_helpers import (_parse_legacy_suffix, DEFAULT_SIDE_NAMES, _side_aliases, _dedupe)
+import logging
+logger = logging.getLogger(__name__)  # <-- add this near the top of the module
 
-def get_metadata(
-    root: Path | str,
-    project_name: str,
-    *,
-    group_name: Optional[str] = None,
-) -> Dict[str, Any]:
-    """
-    Return the attribute dictionary from the first array or group
-    inside a Zarr store.
-
-    Parameters
-    ----------
-    store_path : Path or str
-        Path to the Zarr store directory.
-    group_name : str, optional
-        If provided, return attrs from this subgroup instead of the first found.
-
-    Returns
-    -------
-    attrs : dict
-        The attribute dictionary (may be empty if no attrs found).
-    """
-    root = Path(root)
-    store_dir = root / "built_data" / "zarr_image_files"
-    store_path = store_dir / f"{project_name}.zarr"
-    store = zarr.open(store_path, mode="r")
-
-    # Direct array case
-    if isinstance(store, zarr.Array):
-        return dict(store.attrs)
-
-    # If a specific subgroup is requested
-    if group_name is not None and group_name in store:
-        node = store[group_name]
-        return dict(node.attrs)
-
-    # Otherwise, use your existing first-array traversal logic
-    for name, array in store.arrays():
-        return dict(array.attrs)
-    for name, subgroup in store.groups():
-        attrs = get_first_attrs(store_path / name)
-        if attrs:
-            return attrs
-
-    # If nothing found, return empty dict
-    return {}
+# def get_metadata(
+#     root: Path | str,
+#     project_name: str,
+#     *,
+#     group_name: Optional[str] = None,
+# ) -> Dict[str, Any]:
+#     """
+#     Return the attribute dictionary from the first array or group
+#     inside a Zarr store.
+#
+#     Parameters
+#     ----------
+#     store_path : Path or str
+#         Path to the Zarr store directory.
+#     group_name : str, optional
+#         If provided, return attrs from this subgroup instead of the first found.
+#
+#     Returns
+#     -------
+#     attrs : dict
+#         The attribute dictionary (may be empty if no attrs found).
+#     """
+#     root = Path(root)
+#     store_dir = root / "built_data" / "zarr_image_files"
+#     store_path = store_dir / f"{project_name}.zarr"
+#     store = zarr.open(store_path, mode="r")
+#
+#     # Direct array case
+#     if isinstance(store, zarr.Array):
+#         return dict(store.attrs)
+#
+#     # If a specific subgroup is requested
+#     if group_name is not None and group_name in store:
+#         node = store[group_name]
+#         return dict(node.attrs)
+#
+#     # Otherwise, use your existing first-array traversal logic
+#     for name, array in store.arrays():
+#         return dict(array.attrs)
+#     for name, subgroup in store.groups():
+#         attrs = get_first_attrs(store_path / name)
+#         if attrs:
+#             return attrs
+#
+#     # If nothing found, return empty dict
+#     return {}
 
 
 
@@ -284,9 +286,76 @@ def open_experiment_array(
 
 
 
+def open_mask_array(
+    root: Path | str,
+    project_name: str,
+    seg_type: str = "li_segmentation",
+    *,
+    side: str | None = None,
+    verbose: bool = False,
+    prefer_fused: bool = True,
+    mask_field: str = "clean",
+    well_num: int | None = None,
+    use_gpu: bool | None = None,
+    mode: str = "r",
+) -> Tuple[zarr.Array | VirtualFuseArray, Path, Optional[str]]:
+
+    # get path to store
+    root = Path(root)
+    mask_dir = root / "segmentation" / seg_type
+    if well_num is not None:
+        store_dir = mask_dir / f"{project_name}_well{well_num:04}_masks.zarr"
+    else:
+        store_dir = mask_dir / f"{project_name}_masks.zarr"
+
+    root_group = zarr.open(store_dir, mode=mode)
+    side_keys = sorted([k["name"] for k in root_group.attrs["sides"]])
+
+    if use_gpu is None:
+        use_gpu = _gpu_available()
+
+    # if a specific side is requested, return it
+    if side is not None:
+        if side in side_keys:
+            za = root_group[side][mask_field]
+        elif side == "virtual_fused":
+            if verbose:
+                logger.info(
+                    f"[open_mask_array] Two-sided experiment detected → "
+                    f"VirtualFuseArray(interp='nearest', backend={'GPU' if use_gpu else 'CPU'})"
+                )
+            za = VirtualFuseArray(store_dir, use_gpu=use_gpu, interp="nearest", is_mask=True, subgroup_key=mask_field)
+        else:
+            raise KeyError(f"Requested side '{side}' not found in mask store at {store_dir}.")
+        return za, store_dir, side
+
+    # --- 4️⃣ Try persistent fused group first ---
+    if prefer_fused and "fused" in root_group:
+        if verbose:
+            logger.info(f"[open_mask_array] Using persistent fused array at {store_dir}/fused")
+        return root_group["fused"][mask_field], store_dir, "fused"
+
+    # --- 5️⃣ Detect two-sided structure ---
+    if {"side_00", "side_01"}.issubset(side_keys):
+        if verbose:
+            logger.info(
+                f"[open_mask_array] Two-sided experiment detected → "
+                f"VirtualFuseArray(interp='nearest', backend={'GPU' if use_gpu else 'CPU'})"
+            )
+        vf = VirtualFuseArray(store_dir, use_gpu=use_gpu, interp="nearest", is_mask=True, subgroup_key=mask_field)
+        return vf, store_dir, "virtual_fused"
+
+    # --- 6️⃣ Otherwise fall back to standard side loading ---
+    array = root_group[side_keys[0]][mask_field]
+    if verbose:
+        logger.info(f"[open_mask_array] Loading first available side '{side_keys[0]}' from {store_dir}")
+
+    return array, store_dir, side_keys[0]
+
+
+
 __all__ = [
     "open_image_array",
     "open_experiment_array",
-    "get_metadata"
 ]
 

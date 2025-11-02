@@ -5,25 +5,27 @@ from pathlib import Path
 import os
 from skimage.measure import label, regionprops
 from scipy.interpolate import interp1d
-
+from src.registration.virtual_fusion import VirtualFuseArray
 from src.data_io.zarr_utils import open_experiment_array
 
 os.environ["QT_API"] = "pyqt5"
 
 # get filepaths
-root = Path(r"E:\pipeline_dev\killi_dynamics")
-project = "MEM_NLS_test"
+root = Path(r"Y:\killi_dynamics")
+project = "20251019_BC1-NLS_52-80hpf"
 seg_type = "li_segmentation"
 
 # mpath = root / "built_data" / "mask_stacks" / (project + "_mask_fused.zarr")
-mpath = root / "built_data" / "mask_stacks" / seg_type / (project + "_masks.zarr")
-mask = zarr.open(mpath, mode="r")
+mpath = root / "segmentation" / seg_type / (project + "_masks.zarr")
+m_store = zarr.open(mpath, mode="r")
+mask_vf = m_store["fused"]["clean"]
+
 im, _store_path, _resolved_side = open_experiment_array(root, project)
 # zarr2 = zarr.open(zpath2, mode="r")
 
 # generate frame indices
-t_start = 12
-t_stop = 14
+t_start = 1200
+t_stop = 1201
 nucleus_channel = 1
 frames = np.arange(t_start, t_stop)
 
@@ -32,7 +34,7 @@ scale_vec = tuple(im.attrs["voxel_size_um"])
 
 # extract relevant frames
 im_p = np.squeeze(im[t_start:t_stop, nucleus_channel])
-mask_p = mask["clean"][t_start:t_stop]
+mask_p = mask_vf[t_start:t_stop]
 
 
 viewer = napari.Viewer()

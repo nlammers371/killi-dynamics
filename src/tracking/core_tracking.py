@@ -2,21 +2,21 @@ from pathlib import Path
 import numpy as np
 import dask.array as da
 import zarr
-from src.tracking.track_utils import labels_to_contours_nl
 from ultrack import load_config, track, to_tracks_layer, tracks_to_zarr
 import shutil
 import warnings
 
+from src.tracking.track_utils import labels_to_contours_nl
+from src.data_io.zarr_utils import open_mask_array
 # --- assumed imports from your codebase ---
 # from your_module import load_config, labels_to_contours_nl, track, to_tracks_layer, tracks_to_zarr
-
 
 
 def perform_tracking(
     root: Path,
     project_name: str,
     tracking_config: str,
-    seg_model: str,
+    seg_type: str,
     overwrite_tracking: bool = False,
     overwrite_segmentation: bool = False,
     well_num: int | None = None,
@@ -24,7 +24,6 @@ def perform_tracking(
     stop_i: int | None = None,
     use_stack_flag: bool = False,
     use_marker_masks: bool = False,
-    use_fused: bool = True,
     suffix: str = "",
     par_seg_flag: bool = True,
 ):
@@ -32,28 +31,25 @@ def perform_tracking(
     Execute Ultrack on a mask time series.
     """
     # --- setup ---
-    tracking_name: str = tracking_config.replace(".txt", "")
-
     if well_num is not None:
         file_prefix = f"{project_name}_well{well_num:04}"
-        subfolder = Path(project_name)
     else:
         file_prefix = project_name
-        subfolder = Path()
 
     # --- mask path selection ---
-    mask_dir = root / "built_data" / "mask_stacks" / seg_model / subfolder
-    mask_path = mask_dir / f"{file_prefix}_masks.zarr"
-    mask_store = zarr.open(mask_path, mode="r")
-    # Choose which group or dataset to load
-    mask_field = "thresh_stacks" if use_stack_flag else "clean"
-    # Access that group
-    if mask_field not in mask_store:
-        raise KeyError(f"'{mask_field}' not found in {mask_path}")
-    # Load the group as a zarr array
-    mask_group = mask_store[mask_field]
-    mask_da = da.from_zarr(mask_group)
+    # mask_dir = root / "segmentation" / seg_type
+    # mask_path = mask_dir / f"{file_prefix}_masks.zarr"
+    # mask_store = zarr.open(mask_path, mode="r")
 
+    # load mask data
+    mask_field = "thresh_stacks" if use_stack_flag else "clean"
+    mask_zarr, mask_store_path, side_spec = open_mask_array(root=root,
+                                          project_name=project_name,
+                                          seg_type=seg_type,
+                                          mask_field=mask_field,
+                                          well_num=well_num)
+
+    mask_da = da.from_zarr(mask_zarr)
 
     if stop_i is None:
         stop_i = mask_da.shape[0]
@@ -62,19 +58,18 @@ def perform_tracking(
         project_name += "_marker"
 
     # --- define output directories ---
-    seg_path = root / "tracking" / project_name / "segmentation"
-    project_path = root / "tracking" / project_name / tracking_name
+    seg_path = mask_store_path / side_spec
+    project_path = root / "tracking" / project_name / tracking_config
     if well_num is not None:
-        seg_path = seg_path / f"well{well_num:04}"
         project_path = project_path / f"well{well_num:04}"
 
     project_sub_path = project_path / f"track_{start_i:04}_{stop_i:04}{suffix}"
     project_sub_path.mkdir(parents=True, exist_ok=True)
 
-    if "voxel_size_um" in mask_store.attrs:
-        scale_vec: list[float] = mask_store.attrs["voxel_size_um"]
+    if "voxel_size_um" in mask_zarr.attrs:
+        scale_vec: list[float] = mask_zarr.attrs["voxel_size_um"]
     else:  # for backwards compatibility
-        scale_vec = [mask_store.attrs[k] for k in ("PhysicalSizeZ", "PhysicalSizeY", "PhysicalSizeX")]
+        scale_vec = [mask_zarr.attrs[k] for k in ("PhysicalSizeZ", "PhysicalSizeY", "PhysicalSizeX")]
 
     # check to see if tracing data exists
     # Delete if it exists
@@ -86,35 +81,50 @@ def perform_tracking(
 
     # Recreate empty directory
     project_sub_path.mkdir(parents=True, exist_ok=True)
+
     # --- load configuration ---
     metadata_path = root / "metadata" / "tracking"
     cfg = load_config(metadata_path / f"{tracking_config}.txt")
     cfg.data_config.working_dir = str(project_sub_path)
 
+    # copy the file
+    src = root / "metadata" / "tracking" / f"{tracking_config}.txt"
+    dst = project_path / f"{tracking_config}.txt"
+    shutil.copy2(src, dst)
+
     # --- initialize segmentation stores ---
-    dstore_path: Path = seg_path / "detection.zarr"
-    bstore_path: Path = seg_path / "boundaries.zarr"
+    seg_store = zarr.open_group(seg_path, mode="a")
 
-    dstore = zarr.DirectoryStore(str(dstore_path))
-    bstore = zarr.DirectoryStore(str(bstore_path))
+    # --- create or open arrays directly at the root ---
+    if "detection" not in seg_store or overwrite_segmentation:
+        if "detection" in seg_store:
+            del seg_store["detection"]
+        detection = seg_store.create_dataset(
+            "detection",
+            shape=mask_da.shape,
+            dtype=bool,
+            chunks=(1,) + mask_da.shape[1:],
+            overwrite=True,
+        )
+    else:
+        detection = seg_store["detection"]
 
-    detection = zarr.open(
-        store=dstore,
-        mode="a",
-        shape=mask_da.shape,
-        dtype=bool,
-        chunks=(1,) + mask_da.shape[1:],
-    )
-    boundaries = zarr.open(
-        store=bstore,
-        mode="a",
-        shape=mask_da.shape,
-        dtype=np.uint16,
-        chunks=(1,) + mask_da.shape[1:],
-    )
+    if "boundaries" not in seg_store or overwrite_segmentation:
+        if "boundaries" in seg_store:
+            del seg_store["boundaries"]
+        boundaries = seg_store.create_dataset(
+            "boundaries",
+            shape=mask_da.shape,
+            dtype=np.uint16,
+            chunks=(1,) + mask_da.shape[1:],
+            overwrite=True,
+        )
+    else:
+        boundaries = seg_store["boundaries"]
 
     # --- find missing frames to process ---
     segment_indices = np.arange(start_i, stop_i)
+    dstore_path = seg_path / "detection"
     if not overwrite_segmentation:
         existing_files = list(dstore_path.iterdir()) if dstore_path.exists() else []
         written = {int(p.name.split(".")[0]) for p in existing_files if p.name.split(".")[0].isdigit()}
