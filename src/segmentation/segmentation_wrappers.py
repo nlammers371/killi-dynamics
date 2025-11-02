@@ -80,6 +80,7 @@ def segment_nuclei_thresh(
         side_group = mask_store.require_group(side_key)
 
         # determine nuclear channel
+        image_zarr, _, _ = open_experiment_array(root, project_name, side=side_key)
         channel_list = image_zarr.attrs["channels"]
         multichannel_flag = len(channel_list) > 1
         if nuclear_channel is None:

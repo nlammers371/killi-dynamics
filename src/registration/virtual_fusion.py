@@ -2,12 +2,14 @@ from __future__ import annotations
 import numbers
 from pathlib import Path
 from typing import Tuple, Literal
-from scipy.ndimage import gaussian_filter
 import numpy as np
 import pandas as pd
 import zarr
 import dask.array as da
 from dask import delayed
+from skimage.measure import label
+from tqdm import tqdm
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 # -------------------- optional GPU backend --------------------
 try:
@@ -25,6 +27,28 @@ else:
     from scipy import ndimage as sp_nd
     _meta_scalar = np.array((), dtype=np.float32)
 
+def _fuse_single_frame(args):
+    store_path, t, dtype, is_mask, subgroup_key, ref_name, mov_name, eval_mode, use_gpu, interp = args
+    from src.registration.virtual_fusion import VirtualFuseArray  # or relative import
+
+    vf = VirtualFuseArray(
+        store_path,
+        moving_side=mov_name.split("/")[0],
+        reference_side=ref_name.split("/")[0],
+        eval_mode=eval_mode,
+        use_gpu=use_gpu,
+        is_mask=is_mask,
+        subgroup_key=subgroup_key,
+        interp=interp,
+    )
+    fused_t = vf[t]
+    if hasattr(fused_t, "get"):
+        fused_t = fused_t.get()
+    fused_t = fused_t.astype(dtype, copy=False)
+
+    zarr.open_group(store_path, mode="a")["fused"]["clean"][t] = fused_t
+    return t
+
 class VirtualFuseArray:
     """
     Virtual fused view over a two-sided Zarr store without duplicating data.
@@ -38,14 +62,36 @@ class VirtualFuseArray:
         reference_side: str = "side_00",
         eval_mode: bool = False,
         use_gpu: bool = True,
+        is_mask: bool = False,
+        subgroup_key: str | None = None,
         # seam_sigma_px: tuple = (1.0, 0.5, 0.5),
         interp: Literal["nearest", "linear"] = "nearest",
     ):
         self.store_path = Path(store_path)
-        self.root = zarr.open_group(self.store_path, mode="r")
-
+        self.root = zarr.open_group(self.store_path, mode="a")
+        self.is_mask = is_mask
         self.ref_name = reference_side
         self.mov_name = moving_side
+        if self.is_mask and subgroup_key is None:
+            subgroup_key = "clean"
+
+        # Metadata
+        self.ref_meta = self._parse_side_meta(self.root[self.ref_name].attrs)
+        self.mov_meta = self._parse_side_meta(self.root[self.mov_name].attrs)
+        self.ref_tf = self._load_transform(self.root[self.ref_name].attrs.get("rigid_transform", {}))
+        self.mov_tf = self._load_transform(self.root[self.mov_name].attrs.get("rigid_transform", {}))
+
+        if self.is_mask:
+            self.ref_meta["dim_order"] = self.ref_meta["dim_order"].replace("C", "")
+            self.mov_meta["dim_order"] = self.mov_meta["dim_order"].replace("C", "")
+            self.ref_meta["idx"] = {ax: i for i, ax in enumerate(self.ref_meta["dim_order"])}
+            self.mov_meta["idx"] = {ax: i for i, ax in enumerate(self.mov_meta["dim_order"])}
+
+        self.subgroup_key = subgroup_key
+        if self.subgroup_key is not None:   # append group name
+            self.ref_name = f"{self.ref_name}/{self.subgroup_key}"
+            self.mov_name = f"{self.mov_name}/{self.subgroup_key}"
+
         self.ref = self.root[self.ref_name]
         self.mov = self.root[self.mov_name]
         self.eval_mode = eval_mode
@@ -56,11 +102,7 @@ class VirtualFuseArray:
         self.use_gpu = bool(use_gpu and _HAS_GPU)
         self.xp = _DEFAULT_XP if self.use_gpu else np
 
-        # Metadata
-        self.ref_meta = self._parse_side_meta(self.ref.attrs)
-        self.mov_meta = self._parse_side_meta(self.mov.attrs)
-        self.ref_tf = self._load_transform(self.ref.attrs.get("rigid_transform", {}))
-        self.mov_tf = self._load_transform(self.mov.attrs.get("rigid_transform", {}))
+
 
         # Basic checks
         if self.ref.shape[0] != self.mov.shape[0]:
@@ -75,7 +117,10 @@ class VirtualFuseArray:
         Zr, Yr, Xr = self._side_spatial(self.ref.shape, self.ref_meta)
         Zm, Ym, Xm = self._side_spatial(self.mov.shape, self.mov_meta)
         self.dtype = self.ref.dtype
-        self.shape = (self.ref.shape[0], self.C, Zr + Zm, Yr, Xr)
+        if self.is_mask:
+            self.shape = (self.ref.shape[0], Zr + Zm, Yr, Xr)
+        else:
+            self.shape = (self.ref.shape[0], self.C, Zr + Zm, Yr, Xr)
         self.attrs = dict(self.root.attrs)
 
         # add other useful attributes
@@ -201,12 +246,45 @@ class VirtualFuseArray:
                 arr = arr[np.newaxis, ...]
         return self.xp.asarray(arr) if self.use_gpu else arr
 
+
+
+    def write_fused(self, subgroup="clean", overwrite=False, n_workers=1):
+        dtype = np.uint16 if self.is_mask else np.float32
+        root = zarr.open_group(self.store_path, mode="a")
+        fused_group = root.require_group("fused")
+        fused_z = fused_group.require_dataset(
+            subgroup, shape=self.shape, chunks=(1, 1, 1, self.shape[-2], self.shape[-1]), dtype=dtype,
+            overwrite=overwrite
+        )
+
+        print(f"[VirtualFuseArray] Writing fused dataset → /fused/{subgroup} (parallel={n_workers > 1})")
+
+        if n_workers > 1:
+            args_list = [
+                (self.store_path, t, dtype, self.is_mask, self.subgroup_key,
+                 self.ref_name, self.mov_name, self.eval_mode, self.use_gpu, self.interp)
+                for t in range(self.shape[0])
+            ]
+            with ProcessPoolExecutor(max_workers=n_workers) as ex:
+                futures = {ex.submit(_fuse_single_frame, args): t for t, args in enumerate(args_list)}
+                for f in tqdm(as_completed(futures), total=len(futures)):
+                    try:
+                        f.result()
+                    except Exception as e:
+                        print(f"[!] Frame {futures[f]} failed: {e}")
+        else:
+            for t in tqdm(range(self.shape[0]), desc="Fusing sequentially"):
+                fused_t = self[t]
+                if hasattr(fused_t, "get"):
+                    fused_t = fused_t.get()
+                fused_z[t] = fused_t.astype(dtype, copy=False)
+
     def _fuse_time_roi(self, t, c_sel, zf_slice, yf_slice, xf_slice):
 
-        if _HAS_GPU:
-            print("[VirtualFuseArray] Using CuPy backend.")
-        else:
-            print("[VirtualFuseArray] CuPy not found; using NumPy backend.")
+        # if _HAS_GPU:
+        #     print("[VirtualFuseArray] Using CuPy backend.")
+        # else:
+        #     print("[VirtualFuseArray] CuPy not found; using NumPy backend.")
 
         xp = self.xp
         Zr, Yr, Xr = self._side_spatial(self.ref.shape, self.ref_meta)
@@ -278,7 +356,10 @@ class VirtualFuseArray:
             ).astype(xp.float32, copy=False)
             return arr
 
-        dtype = xp.float32
+        if not self.is_mask:
+            dtype = xp.float32
+        else:
+            dtype = np.uint16
         # lazily make reference block (or empty)
         if rz1 > rz0:
             # 1️⃣ use xp dtype for delayed blocks
@@ -317,7 +398,7 @@ class VirtualFuseArray:
             # order=1, mode="nearest" to match your logic
             return sp_nd.shift(arr, shift=(0, dzf, dyf, dxf), order=1, mode="nearest")
 
-        if self.interp == "linear" and mov_block.shape[1] > 0:
+        if self.interp == "linear" and mov_block.shape[1] > 0 and not self.is_mask:
             mov_block = da.map_blocks(
                 _shift_block, mov_block,
                 dtype=np.float32,
@@ -329,7 +410,8 @@ class VirtualFuseArray:
         # reference placement: pad Z to [r_out_z0:r_out_z1], Y to [0:Yr], X to [0:Xr]
         # pad spec: ((C_pre,C_post),(Z_pre,Z_post),(Y_pre,Y_post),(X_pre,X_post))
         def _pad_to_canvas(block, z0, z1, y0, y1, x0, x1):
-            block = block.map_blocks(xp.asarray)  # enforce backend
+            dtype = np.float32 if not self.is_mask else block.dtype
+            block = block.map_blocks(xp.asarray, dtype=dtype)  # enforce backend
             z_pre, z_post = z0, Z_len - z1
             y_pre, y_post = y0, Y_len - y1
             x_pre, x_post = x0, X_len - x1
@@ -352,7 +434,7 @@ class VirtualFuseArray:
         ov1 = min(r_out_z1, m_out_z1)
         L = ov1 - ov0
 
-        if L > 0 and not self.eval_mode:
+        if L > 0 and not self.eval_mode and not self.is_mask:
             # build broadcastable z-index and weights lazily
             if self.use_gpu:
                 z = da.from_array(self.xp.arange(Z_len, dtype=self.xp.int32))[None, :, None, None]
@@ -369,78 +451,23 @@ class VirtualFuseArray:
         else:
             fused = base_sum
 
-        # if L == 0:
-        #     if getattr(self, "seam_sigma_px", None):
-        #         # Helper to make a (1, Z_len, 1, 1) z-index lazily
-        #         if self.use_gpu:
-        #             z_axis = da.from_array(self.xp.arange(Z_len, dtype=self.xp.int32))[None, :, None, None]
-        #         else:
-        #             z_axis = da.arange(Z_len, dtype=np.int32)[None, :, None, None]
-        #
-        #         # CASE A: zero overlap (but contiguous) -> feather across a small symmetric window centered at the joins
-        #         sz, sy, sx = self.seam_sigma_px
-        #         seam_thickness = int(max(1, 3 * sz))
-        #         join = (ov0 + ov1) // 2
-        #         s = max(0, join - seam_thickness)
-        #         e = min(Z_len, join + seam_thickness)
-        #         if e > s:
-        #             region = fused[:, s:e, :, :]
-        #             # Convert CuPy -> NumPy if needed (scipy.ndimage doesn't run on GPU)
-        #             # apply 3D Gaussian within this local slab
-        #             if self.use_gpu:
-        #                 region_np = region.get()
-        #                 region_np = gaussian_filter(region_np, sigma=(0, sz, sy, sx))
-        #                 region = self.xp.asarray(region_np)
-        #             else:
-        #                 region = gaussian_filter(region, sigma=(0, sz, sy, sx))
-        #
-        #             fused[:, s:e] = region
-
-            # CASE B: negative overlap (a small gap) -> fill the gap by interpolating between edge slices
-            # Ref ends before mov starts: gap = [r_out_z1, m_out_z0)
-            # if r_out_z1 < m_out_z0:
-            #     gap_s, gap_e = r_out_z1, m_out_z0
-            #     G = gap_e - gap_s
-            #     if G > 0:
-            #         # Take boundary planes (C,1,Y,X)
-            #         # left edge from ref at z=r_out_z1-1, right edge from mov at z=m_out_z0
-            #         ref_edge = ref_canvas[:, r_out_z1 - 1:r_out_z1] if r_out_z1 > 0 else da.zeros(
-            #             (C_len, 1, Y_len, X_len), dtype=np.float32)
-            #         mov_edge = mov_canvas[:, m_out_z0:m_out_z0 + 1] if m_out_z0 < Z_len else da.zeros(
-            #             (C_len, 1, Y_len, X_len), dtype=np.float32)
-            #         # broadcast linearly across the gap
-            #         w_gap = (self.xp.linspace(0.0, 1.0, G, dtype=self.xp.float32)[None, :, None, None])
-            #         w_gap = da.from_array(w_gap) if not isinstance(w_gap, da.Array) else w_gap
-            #         gap_fill = (1.0 - w_gap) * ref_edge + w_gap * mov_edge
-            #         fused = da.concatenate([fused[:, :gap_s], gap_fill, fused[:, gap_e:]], axis=1)
-            #
-            # # Mirror of Case B: mov ends before ref starts
-            # if m_out_z1 < r_out_z0:
-            #     gap_s, gap_e = m_out_z1, r_out_z0
-            #     G = gap_e - gap_s
-            #     if G > 0:
-            #         mov_edge = mov_canvas[:, m_out_z1 - 1:m_out_z1] if m_out_z1 > 0 else da.zeros(
-            #             (C_len, 1, Y_len, X_len), dtype=np.float32)
-            #         ref_edge = ref_canvas[:, r_out_z0:r_out_z0 + 1] if r_out_z0 < Z_len else da.zeros(
-            #             (C_len, 1, Y_len, X_len), dtype=np.float32)
-            #         w_gap = (self.xp.linspace(0.0, 1.0, G, dtype=self.xp.float32)[None, :, None, None])
-            #         w_gap = da.from_array(w_gap) if not isinstance(w_gap, da.Array) else w_gap
-            #         gap_fill = (1.0 - w_gap) * mov_edge + w_gap * ref_edge
-            #         fused = da.concatenate([fused[:, :gap_s], gap_fill, fused[:, gap_e:]], axis=1)
-
-        # final crop to the requested fused ROI
         # Apply any requested slicing
         fused = fused[:, zf_slice, yf_slice, xf_slice]
 
-        # Trigger compute if Dask array
+        # ---- materialize (compute) ----
         if hasattr(fused, "compute"):
-            out = fused.compute()
-        else:
-            out = fused
+            fused = fused.compute()
 
-        # Final cast to dtype and return
-        # out = np.asarray(out, dtype=self.dtype)
-        return out
+        # ---- move to CPU if on GPU ----
+        if hasattr(fused, "get"):
+            fused = fused.get()
+
+        # ---- label only now ----
+        if self.is_mask:
+            fused = label(fused > 0)
+
+        # ---- finalize ----
+        return fused
 
     # ---------------- Indexing ---------------- #
     def __getitem__(self, key):
@@ -462,11 +489,12 @@ class VirtualFuseArray:
         xp = self.xp
 
         # ensure homogeneous backend before stacking
-        if self.use_gpu:
+        if self.use_gpu and not self.is_mask:
             out = self.xp.stack(frames, axis=0)
             out = np.asarray(out.get(), dtype=self.dtype)
         else:
             out = np.stack(frames, axis=0)
+            out = out.astype(self.dtype, copy=False)
 
         if squeeze_t:
             out = out[0]
