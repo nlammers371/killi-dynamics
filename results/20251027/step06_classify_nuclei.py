@@ -19,5 +19,4 @@ if __name__ == "__main__":
                                 well_num=well_num,
                                 use_foreground=True,
                                 n_workers=n_workers,
-                                mask_field="clean",
-                            )
+                                mask_field="clean")
