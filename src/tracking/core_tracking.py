@@ -31,10 +31,6 @@ def perform_tracking(
     Execute Ultrack on a mask time series.
     """
     # --- setup ---
-    if well_num is not None:
-        file_prefix = f"{project_name}_well{well_num:04}"
-    else:
-        file_prefix = project_name
 
     # --- mask path selection ---
     # mask_dir = root / "segmentation" / seg_type
