@@ -9,4 +9,4 @@ if __name__ == "__main__":
     project_name = "20251019_BC1-NLS_52-80hpf"
 
     # call function
-    extract_foreground_intensities(root, project_name, n_workers=12, overwrite=True)
+    extract_foreground_intensities(root, project_name, n_workers=1, overwrite=True)
