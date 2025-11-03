@@ -10,6 +10,8 @@ from dask import delayed
 from skimage.measure import label
 from tqdm import tqdm
 from concurrent.futures import ProcessPoolExecutor, as_completed
+import multiprocessing
+import warnings
 
 # -------------------- optional GPU backend --------------------
 try:
@@ -74,6 +76,18 @@ class VirtualFuseArray:
         self.mov_name = moving_side
         if self.is_mask and subgroup_key is None:
             subgroup_key = "clean"
+
+        # --- detect multiprocessing context ---
+        proc = multiprocessing.current_process()
+        if proc.name != "MainProcess":
+            if use_gpu:
+                warnings.warn(
+                    f"[VirtualFuseArray] Detected worker process ({proc.name}) — "
+                    f"disabling GPU backend to prevent CUDA deadlocks."
+                )
+            self.use_gpu = False
+        else:
+            self.use_gpu = use_gpu
 
         # Metadata
         self.ref_meta = self._parse_side_meta(self.root[self.ref_name].attrs)
@@ -489,12 +503,12 @@ class VirtualFuseArray:
         xp = self.xp
 
         # ensure homogeneous backend before stacking
-        if self.use_gpu and not self.is_mask:
-            out = self.xp.stack(frames, axis=0)
-            out = np.asarray(out.get(), dtype=self.dtype)
-        else:
-            out = np.stack(frames, axis=0)
-            out = out.astype(self.dtype, copy=False)
+        # if self.use_gpu and not self.is_mask:
+        #     out = np.stack(frames, axis=0)
+        #     out = out.astype(self.dtype, copy=False)
+        # else:
+        out = np.stack(frames, axis=0)
+        out = out.astype(self.dtype, copy=False)
 
         if squeeze_t:
             out = out[0]

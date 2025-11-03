@@ -204,6 +204,8 @@ def open_experiment_array(
     side: str | None = None,
     prefer_fused: bool = True,
     use_gpu: bool | None = None,
+    well_num: int | None = None,
+    verbose: bool = False,
     mode: str = "r",
 ) -> Tuple[zarr.Array | VirtualFuseArray, Path, Optional[str]]:
     """
@@ -239,7 +241,10 @@ def open_experiment_array(
     # get path to store
     root = Path(root)
     image_dir = root / "built_data" / "zarr_image_files"
-    store_dir = image_dir / f"{project_name}.zarr"
+    if well_num is not None:
+        store_dir = image_dir / f"{project_name}_well{well_num:04}.zarr"
+    else:
+        store_dir = image_dir / f"{project_name}.zarr"
     root_group = zarr.open_group(store_dir, mode=mode)
     side_keys = sorted([k for k in root_group.array_keys() if k.startswith("side_")])
 
@@ -250,37 +255,40 @@ def open_experiment_array(
     if side is not None:
         if side in side_keys:
             za = root_group[side]
-        elif side == "virtual_fused":
+        elif side == "virtual_fused" or side == "fused":
             interp = "linear" if use_gpu else "nearest"
-            print(
-                f"[open_experiment_array] Two-sided experiment detected → "
-                f"VirtualFuseArray(interp='{interp}', backend={'GPU' if use_gpu else 'CPU'})"
-            )
+            if verbose:
+                print(
+                    f"[open_experiment_array] Two-sided experiment detected → "
+                    f"VirtualFuseArray(interp='{interp}', backend={'GPU' if use_gpu else 'CPU'})"
+                )
             za = VirtualFuseArray(store_dir, use_gpu=use_gpu, interp=interp)
         return za, store_dir, side
 
 
     # --- 4️⃣ Try persistent fused group first ---
-
     if prefer_fused and "fused" in root_group:
-        print(f"[open_experiment_array] Using persistent fused array at {store_dir}/fused")
+        if verbose:
+            print(f"[open_experiment_array] Using persistent fused array at {store_dir}/fused")
         return root_group["fused"], store_dir, "fused"
 
     # --- 5️⃣ Detect two-sided structure ---
     if {"side_00", "side_01"}.issubset(side_keys):
         interp = "linear" if use_gpu else "nearest"
-        print(
-            f"[open_experiment_array] Two-sided experiment detected → "
-            f"VirtualFuseArray(interp='{interp}', backend={'GPU' if use_gpu else 'CPU'})"
-        )
+        if verbose:
+            print(
+                f"[open_experiment_array] Two-sided experiment detected → "
+                f"VirtualFuseArray(interp='{interp}', backend={'GPU' if use_gpu else 'CPU'})"
+            )
         vf = VirtualFuseArray(store_dir, use_gpu=use_gpu, interp=interp)
         return vf, store_dir, "virtual_fused"
 
     # --- 6️⃣ Otherwise fall back to standard side loading ---
     array = root_group[side_keys[0]]
-    print(
-        f"[open_experiment_array] Loading first available side '{side_keys[0]}' from {store_dir}"
-    )
+    if verbose:
+        print(
+            f"[open_experiment_array] Loading first available side '{side_keys[0]}' from {store_dir}"
+        )
 
     return array, store_dir, side_keys[0]
 
