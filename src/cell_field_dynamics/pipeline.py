@@ -1,13 +1,13 @@
-"""Top-level orchestration for the :mod:`cell_dynamics` analysis pipeline."""
+"""Top-level orchestration for the :mod:`cell_field_dynamics` analysis pipeline."""
 from __future__ import annotations
 
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
-from src.cell_dynamics.cd_utils import add_sphere_coords_to_tracks
+from src.cell_field_dynamics.cd_utils import add_sphere_coords_to_tracks
 import pandas as pd
 from src.data_io.zarr_utils import get_metadata
-from src.cell_dynamics.config import (
+from src.cell_field_dynamics.config import (
     GridConfig,
     MaterialsConfig,
     NoiseConfig,
@@ -16,8 +16,8 @@ from src.cell_dynamics.config import (
     SmoothingConfig,
     WindowConfig,
 )
-from src.cell_dynamics import flux, grids, io_functions, materials, metrics, msd, qc, vector_field
-from src.cell_dynamics.cd_utils import load_tracking_data
+from src.cell_field_dynamics import flux, grids, io_functions, materials, metrics, msd, qc, vector_field
+from src.cell_field_dynamics.cd_utils import load_tracking_data
 
 
 # def _normalise_tracking_output(data: Any) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -65,7 +65,7 @@ def run(
     downstream notebooks while the full scientific algorithms are developed.
     """
 
-    out_root = root / "cell_dynamics" / project_name / track_config_name
+    out_root = root / "cell_field_dynamics" / project_name / track_config_name
     out_root = Path(out_root)
     out_root.mkdir(parents=True, exist_ok=True)
     load_kwargs = {

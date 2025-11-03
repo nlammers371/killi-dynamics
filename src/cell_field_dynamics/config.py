@@ -1,4 +1,4 @@
-"""Configuration dataclasses for the :mod:`cell_dynamics` pipeline."""
+"""Configuration dataclasses for the :mod:`cell_field_dynamics` pipeline."""
 from __future__ import annotations
 
 from dataclasses import dataclass
