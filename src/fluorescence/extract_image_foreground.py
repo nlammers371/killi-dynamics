@@ -106,19 +106,44 @@ def extract_foreground_intensities(
 
     # --- set up output group path ---
     fg_group_name = f"foreground_{mask_field}"
-    if fg_group_name in group:
-        if overwrite:
-            del group[fg_group_name]
-        else:
-            print(f"[extract_foreground_intensities] Using existing group '{fg_group_name}'")
-            return mask_store_path / side_spec
 
-    fg_root = group.create_group(fg_group_name)
-    fg_root.attrs.update({
-        "description": "Sparse per-frame foreground voxel coordinates and intensities",
-        "n_channels": n_channels,
-        "voxel_size_um": scale_vec,
-    })
+    if fg_group_name not in group:
+        fg_root = group.create_group(fg_group_name)
+        fg_root.attrs.update({
+            "description": "Sparse per-frame foreground voxel coordinates and intensities",
+            "n_channels": n_channels,
+            "voxel_size_um": scale_vec.tolist(),
+        })
+        written_t = set()
+    else:
+        fg_root = group[fg_group_name]
+
+        # Find which timepoints already exist (t0000, t0001, etc.)
+        written_t = {
+            int(k[1:]) for k in fg_root.keys() if k.startswith("t") and k[1:].isdigit()
+        }
+
+        if overwrite:
+            print(f"[extract_foreground_intensities] Overwriting existing foreground group '{fg_group_name}'")
+            del group[fg_group_name]
+            fg_root = group.create_group(fg_group_name)
+            fg_root.attrs.update({
+                "description": "Sparse per-frame foreground voxel coordinates and intensities",
+                "n_channels": n_channels,
+                "voxel_size_um": scale_vec.tolist(),
+            })
+            written_t = set()
+        else:
+            print(f"[extract_foreground_intensities] Found existing foreground group '{fg_group_name}' "
+                  f"with {len(written_t)} existing timepoints.")
+
+    # Compute which frames still need writing
+    all_t = set(range(n_t))
+    to_write = sorted(all_t - written_t)
+
+    if not to_write:
+        print(f"[extract_foreground_intensities] All {n_t} timepoints already written. Nothing to do.")
+        return mask_store_path / side_spec
 
     call_extract_foreground = partial(_extract_foreground_single,
                                         root=root,
@@ -134,12 +159,12 @@ def extract_foreground_intensities(
     # --- run parallel or serial ---
     if n_workers > 1:
         process_map(call_extract_foreground,
-                    range(n_t),
+                    to_write,
                     max_workers=n_workers,
                     chunksize=1,
                     desc="Extracting foreground intensities...")
     else:
-        for t in tqdm(range(n_t), desc="Extracting foreground intensities..."):
+        for t in tqdm(tp_write, desc="Extracting foreground intensities..."):
             call_extract_foreground(t)
 
     print(f"[extract_foreground_intensities] Done — stored under {mask_store_path}/{side_spec}/{fg_group_name}")

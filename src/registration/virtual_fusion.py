@@ -203,7 +203,9 @@ class VirtualFuseArray:
         shifts = None
         path = tdict.get("per_frame_shifts", None)
         if isinstance(path, str):
-            csv_path = self.store_path / path
+            name_start = path.index("shift")
+            name = path[name_start:]
+            csv_path = self.store_path / "registration" / name
             df = pd.read_csv(csv_path)
             if not {"frame", "zs", "ys", "xs"}.issubset(df.columns):
                 raise ValueError(f"Shift CSV missing columns: {csv_path}")
