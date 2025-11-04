@@ -10,7 +10,7 @@ import pandas as pd
 from skimage.registration import phase_cross_correlation
 from tqdm.contrib.concurrent import process_map
 
-from src.data_io.zarr_utils import open_experiment_array
+from src.data_io.zarr_io import open_experiment_array
 
 def align_halves(t, image_data1, image_data2, z_align_size=50, nucleus_channel=1):
 

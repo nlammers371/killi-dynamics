@@ -3,9 +3,9 @@ import pandas as pd
 from pathlib import Path
 from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map
-from skimage.measure import regionprops, regionprops_table
+from skimage.measure import regionprops
 import zarr
-from src.data_io.zarr_utils import open_mask_array, open_experiment_array
+from src.data_io.zarr_io import open_mask_array, open_experiment_array
 from functools import partial
 import warnings
 

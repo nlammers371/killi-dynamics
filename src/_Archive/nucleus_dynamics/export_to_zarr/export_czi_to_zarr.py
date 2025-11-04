@@ -1,7 +1,7 @@
 """Backward-compatible import for the CZI export utilities."""
 from warnings import warn
 
-from src.data_io._Archive.czi_export import (
+from src.export._Archive.czi_export import (
     export_czi_to_zarr,
     get_prefix_list,
     initialize_zarr_store,
@@ -10,7 +10,7 @@ from src.data_io._Archive.czi_export import (
 
 warn(
     "src.nucleus_dynamics.export_to_zarr.export_czi_to_zarr is deprecated; "
-    "import from src.data_io.czi_export instead.",
+    "import from src.export.czi_export instead.",
     DeprecationWarning,
     stacklevel=2,
 )

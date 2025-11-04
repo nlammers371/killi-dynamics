@@ -12,7 +12,7 @@ import statsmodels.api as sm
 from tqdm import tqdm
 import zarr
 from types import SimpleNamespace
-from src.data_io.zarr_utils import open_experiment_array
+from src.data_io.zarr_io import open_experiment_array
 from concurrent.futures import ProcessPoolExecutor, as_completed, TimeoutError
 
 # ------------------------------------------------------------------------- #

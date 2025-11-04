@@ -3,10 +3,7 @@ import napari
 import numpy as np
 from pathlib import Path
 import os
-from skimage.measure import label, regionprops
-from scipy.interpolate import interp1d
-from src.registration.virtual_fusion import VirtualFuseArray
-from src.data_io.zarr_utils import open_experiment_array
+from src.data_io.zarr_io import open_experiment_array
 
 os.environ["QT_API"] = "pyqt5"
 

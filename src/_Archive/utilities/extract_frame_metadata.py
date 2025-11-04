@@ -1,7 +1,7 @@
-"""Compatibility layer for metadata helpers relocated to `src.data_io`."""
+"""Compatibility layer for metadata helpers relocated to `src.export`."""
 from warnings import warn
 
-from src.data_io.nd2_metadata import (
+from src.export.nd2_metadata import (
     extract_frame_metadata,
     parse_curation_metadata,
     parse_nd2_metadata,
@@ -11,7 +11,7 @@ from src.data_io.nd2_metadata import (
 
 warn(
     "src.utilities.extract_frame_metadata is deprecated; "
-    "import from src.data_io.nd2_metadata instead.",
+    "import from src.export.nd2_metadata instead.",
     DeprecationWarning,
     stacklevel=2,
 )

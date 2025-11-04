@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from scipy.spatial import cKDTree
 from typing import Dict, List, Tuple, Any, Optional
-
+from tqdm import tqdm
 # ---------- (unchanged) projection & graph helpers ----------
 
 # def _spherical_overlap(uA, uB, nside=128):
@@ -137,7 +137,7 @@ def find_clusters_per_timepoint(
     sph = sphere_df.set_index(sphere_time_col)[list(sphere_center_cols)+[sphere_radius_col]]
     clusters_by_t: Dict[Any, List[dict]] = {}
 
-    for t_val, df_t in tracks_df.groupby(time_col, sort=True):
+    for t_val, df_t in tqdm(tracks_df.groupby(time_col, sort=True), desc="Finding clusters per timepoint"):
         if t_val not in sph.index:
             continue
         xc, yc, zc = sph.loc[t_val, list(sphere_center_cols)].values
@@ -271,7 +271,7 @@ def track_clusters_over_time(
     rows = []
     merges = []
 
-    for i, t in enumerate(times):
+    for i, t in enumerate(tqdm(times, desc="Linking clusters over time")):
         curr = clusters_by_t[t]
 
         if i == 0:
@@ -427,7 +427,7 @@ def stitch_tracklets(
 
     # Build per-cluster contiguous segments (tracklets)
     seg_rows = []
-    for cid, d in df.groupby("cluster_id"):
+    for cid, d in tqdm(df.groupby("cluster_id"), desc="Stitching tracklets"):
         tt = d.sort_values("t")
         times = tt["t"].to_numpy()
         # segment breaks where t jumps > 1
