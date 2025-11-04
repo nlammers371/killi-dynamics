@@ -1,18 +1,9 @@
-from pathlib import Path
-import pandas as pd
 import numpy as np
-import zarr
 from astropy_healpix import HEALPix
 from scipy.sparse import csr_matrix, eye
 from scipy.sparse.linalg import spsolve
 from sklearn.neighbors import BallTree
 import astropy.units as u
-from src.data_io.zarr_utils import open_experiment_array
-
-
-
-
-
 
 
 def laplacian_smooth(field, tau=0.2, steps=2):
@@ -79,7 +70,6 @@ def smooth_on_sphere(field: np.ndarray, sigma_deg: float = 10.0, k: int = 25) ->
 
 
 __all__ = [
-    "load_tracking_data",
     "laplacian_smooth",
     "smooth_field_on_sphere_knn",
     "smooth_on_sphere",

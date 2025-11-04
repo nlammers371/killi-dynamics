@@ -3,14 +3,13 @@ import numpy as np
 from typing import Iterable
 from skimage.measure import regionprops_table
 from src.geometry.spherical_harmonics import fit_sh_healpix
-from src.data_io.zarr_utils import open_mask_array
+from src.data_io.zarr_io import open_mask_array
 from tqdm import tqdm
 import pandas as pd
 import zarr
 from pathlib import Path
 from tqdm.contrib.concurrent import process_map
 from functools import partial
-from src.registration.virtual_fusion import VirtualFuseArray
 import logging
 import json
 

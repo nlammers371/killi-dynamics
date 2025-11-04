@@ -7,7 +7,7 @@ import shutil
 import warnings
 
 from src.tracking.tracking_utils import labels_to_contours_nl
-from src.data_io.zarr_utils import open_mask_array
+from src.data_io.zarr_io import open_mask_array
 # --- assumed imports from your codebase ---
 # from your_module import load_config, labels_to_contours_nl, track, to_tracks_layer, tracks_to_zarr
 

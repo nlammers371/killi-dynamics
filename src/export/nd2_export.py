@@ -4,7 +4,7 @@ import glob2 as glob
 import os
 import nd2
 from tqdm import tqdm
-from src.data_io.nd2_metadata import extract_frame_metadata, permute_nd2_axes
+from src.export.nd2_metadata import extract_frame_metadata, permute_nd2_axes
 from tqdm.contrib.concurrent import process_map
 from functools import partial
 

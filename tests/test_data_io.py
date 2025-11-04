@@ -20,7 +20,7 @@ if "bioio" not in sys.modules:
 for name in ("bioio_czi", "bioio_ome_zarr"):
     sys.modules.setdefault(name, types.ModuleType(name))
 
-from src.data_io._Archive import czi_export
+from src.export._Archive import czi_export
 
 
 class DummyBioImage:

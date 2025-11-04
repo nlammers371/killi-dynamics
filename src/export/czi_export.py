@@ -1,6 +1,6 @@
 """Enhanced CZI export helpers with multi-side support.
 
-This module extends :mod:`src.data_io.czi_export` to automatically detect and
+This module extends :mod:`src.export.czi_export` to automatically detect and
 export experiments that contain multiple fields of view ("sides").  Two common
 acquisition patterns are handled:
 

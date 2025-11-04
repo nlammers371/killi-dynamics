@@ -1,8 +1,8 @@
 import numpy as np
 from pathlib import Path
 import pandas as pd
-from skimage.measure import regionprops_table, regionprops
-from src.data_io.zarr_utils import open_mask_array, open_experiment_array
+from skimage.measure import regionprops_table
+from src.data_io.zarr_io import open_mask_array, open_experiment_array
 from functools import partial
 import re
 from tqdm import tqdm

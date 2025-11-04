@@ -23,7 +23,7 @@ import zarr
 from pathlib import Path
 from typing import Optional, Any, Dict, Literal
 from src.registration.virtual_fusion import VirtualFuseArray
-from src.data_io.legacy_helpers import (_parse_legacy_suffix, DEFAULT_SIDE_NAMES, _side_aliases, _dedupe)
+from src.export.legacy_helpers import (_parse_legacy_suffix, DEFAULT_SIDE_NAMES, _side_aliases, _dedupe)
 import logging
 logger = logging.getLogger(__name__)  # <-- add this near the top of the module
 

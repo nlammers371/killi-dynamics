@@ -1,38 +1,13 @@
-from concurrent.futures import ProcessPoolExecutor
 from tqdm.contrib.concurrent import process_map
 import pandas as pd
 import numpy as np
 from scipy.signal import savgol_filter
 from pathlib import Path
-from src.data_io.zarr_utils import open_experiment_array
+from src.data_io.zarr_io import open_experiment_array
+from src.data_io.track_io import _load_tracks
 from functools import partial
 
-def _load_tracks(root: Path,
-                 project_name: str,
-                 tracking_config: str,
-                 tracking_range: tuple[int, int] | None = None,
-                 prefer_smoothed: bool = True
-                 ):
-    # --- open segmentation and experiment arrays ---
-    tracking_root = root / "tracking" / project_name / tracking_config
-    if tracking_range is not None:
-        tracking_dir = tracking_root / f"{tracking_range[0]:04d}_{tracking_range[1]:04d}"
-    else:
-        tracking_results = sorted(tracking_root.glob("track*"))
-        tracking_results = [d for d in tracking_results if d.is_dir()]
-        if len(tracking_results) == 1:
-            tracking_dir = tracking_results[0]
-        elif len(tracking_results) == 0:
-            raise FileNotFoundError(f"No tracking results found in {tracking_root}")
-        else:
-            raise ValueError(f"Multiple tracking results found in {tracking_root}, please specify tracking_range.")
 
-    if prefer_smoothed and (tracking_dir / "tracks_smoothed.csv").is_file():
-        tracks = pd.read_csv(tracking_dir / "tracks_smoothed.csv")
-    else:
-        tracks = pd.read_csv(tracking_dir / "tracks.csv")
-
-    return tracks, tracking_dir
 def _smooth_single_track(group: pd.DataFrame,
                          coord_cols: list[str],
                          sg_window_frames: int,
@@ -119,7 +94,7 @@ def smooth_tracks_wrapper(  root: Path,
                             sg_poly: int = 2,
                             ) -> pd.DataFrame:
 
-    tracks, _ = _load_tracks(root, project_name, tracking_config, tracking_range)
+    tracks, tracking_dir = _load_tracks(root, project_name, tracking_config, tracking_range)
     image_store, _, _ = open_experiment_array(root=root, project_name=project_name, well_num=None, use_gpu=False)
     tres_min = image_store.attrs["time_resolution_s"] / 60
     smoothed_tracks = smooth_tracks(tracks,
@@ -128,11 +103,9 @@ def smooth_tracks_wrapper(  root: Path,
                                     sg_window_minutes=sg_window_minutes,
                                     sg_poly=sg_poly)
 
-    smoothed_tracks = tracks.rename(columns={"x": "x_raw", "y": "y_raw", "z": "z_raw"}).merge(
-                                    smoothed_tracks.loc[:, ["track_id", "t", "x", "y", "z"]],
-                                    on=["track_id", "t"], how="left")
+    smoothed_tracks = smoothed_tracks.loc[:, ["track_id", "parent_track_id", "t", "x", "y", "z"]]
 
-    smoothed_tracks.to_csv(tracking_dir / "tracks_smoothed.csv", index=False)
+    smoothed_tracks.to_csv(tracking_dir / "tracks_smooth.csv", index=False)
 
     return smoothed_tracks
 

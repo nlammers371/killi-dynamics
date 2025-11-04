@@ -5,8 +5,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 from src.cell_field_dynamics.cd_utils import add_sphere_coords_to_tracks
-import pandas as pd
-from src.data_io.zarr_utils import get_metadata
+from src.data_io.zarr_io import get_metadata
 from src.cell_field_dynamics.config import (
     GridConfig,
     MaterialsConfig,
