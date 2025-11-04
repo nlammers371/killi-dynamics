@@ -7,6 +7,7 @@ from skimage.measure import regionprops, regionprops_table
 import zarr
 from src.data_io.zarr_utils import open_mask_array, open_experiment_array
 from functools import partial
+import warnings
 
 # -------------------------------------------------------------------------
 # --- Helper: per-region feature extraction (same geometry logic as before)
@@ -69,7 +70,9 @@ def process_frame(
         if img_zarr is None:
             raise ValueError("img_zarr is required when not using foreground mode.")
         img = np.asarray(img_zarr[t, nuclear_channel]).squeeze()
-        regions = regionprops(seg, intensity_image=img, spacing=scale_vec)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message=".*convex hull.*")
+            regions = regionprops(seg, intensity_image=img, spacing=scale_vec)
         df = pd.DataFrame([extract_region_features(r) for r in regions])
         df["frame"] = t
         return df
@@ -80,7 +83,9 @@ def process_frame(
         return pd.DataFrame(columns=["label", "frame"])
 
     # 1️⃣ Geometry-only features
-    regions_geom = regionprops(seg, spacing=scale_vec)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=".*convex hull.*")
+        regions_geom = regionprops(seg, spacing=scale_vec)
     df_geom = pd.DataFrame([extract_region_features(r) for r in regions_geom])
 
     # 2️⃣ Intensity features from sparse zarr

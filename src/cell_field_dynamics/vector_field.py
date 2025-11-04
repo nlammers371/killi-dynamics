@@ -92,45 +92,6 @@ class VectorFieldResult:
     jacobian: np.ndarray
 
 
-def smooth_tracks(tracks: pd.DataFrame, smooth_cfg: SmoothingConfig, dT: float) -> pd.DataFrame:
-    """Apply Savitzky–Golay smoothing to Cartesian coordinates per track."""
-
-    if tracks.empty:
-        return tracks.copy()
-
-    coord_cols = [c for c in ("x", "y", "z") if c in tracks.columns]
-    if len(coord_cols) != 3:
-        return tracks.copy()
-
-    track_col = "track_id" if "track_id" in tracks.columns else None
-    time_col = "time_min" if "time_min" in tracks.columns else "t" if "t" in tracks.columns else None
-    if time_col is None or track_col is None:
-        raise ValueError("Tracks dataframe requires a temporal column (time_min/t) and a track ID column (track_id).")
-
-    if track_col is None or time_col is None:
-        return tracks.copy()
-
-    smoothed = tracks.copy()
-    smoothed = smoothed.sort_values([track_col, time_col])
-    sg_window_frames = int(smooth_cfg.sg_window_minutes / dT) // 2 * 2 + 1
-    for _, group in smoothed.groupby(track_col):
-        idx = group.index
-        n = len(group)
-        if n < 3:
-            continue
-        window = min(sg_window_frames, n)
-        if window % 2 == 0:
-            window = max(3, window - 1)
-        if window < 3:
-            continue
-        for col in coord_cols:
-            smoothed.loc[idx, col] = savgol_filter(
-                group[col].to_numpy(dtype=float),
-                window_length=window,
-                polyorder=min(smooth_cfg.sg_poly, window - 1),
-                mode="interp",
-            )
-    return smoothed
 
 
 def _angles_from_vectors(vectors: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
