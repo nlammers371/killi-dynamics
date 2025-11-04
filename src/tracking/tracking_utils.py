@@ -117,3 +117,5 @@ def label_fun(t, write_indices, labels, foreground, contours, shape, sigma=None)
     out_index = np.where(write_indices == t)[0][0]  # find the index in write_indices
     foreground[out_index] = to_cpu(foreground_frame)
     contours[out_index] = to_cpu(contours_frames)
+
+

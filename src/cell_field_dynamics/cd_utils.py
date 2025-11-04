@@ -10,65 +10,9 @@ import astropy.units as u
 from src.data_io.zarr_utils import open_experiment_array
 
 
-def add_sphere_coords_to_tracks(tracks_df: pd.DataFrame, sphere_df: pd.DataFrame) -> pd.DataFrame:
 
-    smoothed_centers = sphere_df.loc[:, ["t", "center_x_smooth", "center_y_smooth", "center_z_smooth", "radius_smooth"]]
-    tracks_df = tracks_df.merge(smoothed_centers, on="t", how="left")
-    rel = tracks_df[["x", "y", "z"]].to_numpy() - tracks_df[
-        ["center_x_smooth", "center_y_smooth", "center_z_smooth"]].to_numpy()
-    r = np.sqrt(np.einsum("ij,ij->i", rel, rel))
-    theta = np.arccos(np.clip(rel[:, 2] / r, -1, 1))
-    phi = np.mod(np.arctan2(rel[:, 1], rel[:, 0]), 2 * np.pi)
-    tracks_df["r"] = r
-    tracks_df["theta"] = theta
-    tracks_df["phi"] = phi
 
-    return tracks_df
 
-def load_tracking_data(
-    root: str,
-    project_name: str,
-    track_config_name: str,
-    seg_type: str = "li_segmentation",
-    track_instance_str: str | None = None,
-    cell_class: int | None = None,
-):
-    root = Path(root)
-    track_dir = root / "tracking" / project_name / track_config_name
-    if track_instance_str is None:
-        instance_dirs = sorted(track_dir.glob("track_*"), key=lambda p: p.stat().st_mtime)
-        if len(instance_dirs) == 0:
-            raise ValueError(f"No tracking instance directories found in {track_dir}")
-        elif len(instance_dirs) > 1:
-            print(f"Multiple tracking instances found. Using latest: {instance_dirs[-1].name}")
-        track_instance_str = instance_dirs[-1].name
-    track_dir = track_dir / track_instance_str
-
-    track_path = track_dir / "tracks_fluo.csv"
-    if not track_path.exists():
-        track_path = track_dir / "tracks.csv"
-    tracks_df = pd.read_csv(track_path)  # tracking
-
-    sphere_path = root / "geometry" / f"{project_name}_sphere_fits.csv"
-    sphere_df = pd.read_csv(sphere_path)  # sphere fits
-    class_path = track_dir / "track_class_df.csv"
-    if class_path.exists():
-        class_df = pd.read_csv(class_path)  # track classifications
-    else:
-        class_df = None
-
-    # we have to rescale x,y,z to microns...
-    im_zarr, _store_path, _resolved_side = open_experiment_array(root, project_name)
-    scale_vec = np.array(im_zarr.attrs["voxel_size_um"])
-    tracks_df[["z", "y", "x"]] = np.multiply(tracks_df[["z", "y", "x"]].to_numpy(), scale_vec[None, :])
-    tracks_df["time_min"] = tracks_df["t"].astype(float) * im_zarr.attrs["time_resolution_s"] / 60.0
-
-    if cell_class is not None and class_df is not None:
-        # placeholder code for now
-        valid_tracks = class_df[class_df["class"] == cell_class]["particle"].unique()
-        tracks_df = tracks_df[tracks_df["particle"].isin(valid_tracks)].reset_index(drop=True)
-
-    return tracks_df, sphere_df, class_df
 
 
 def laplacian_smooth(field, tau=0.2, steps=2):

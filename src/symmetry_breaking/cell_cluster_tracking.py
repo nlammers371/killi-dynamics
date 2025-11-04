@@ -126,7 +126,7 @@ def find_clusters_per_timepoint(
     tracks_df: pd.DataFrame,
     sphere_df: pd.DataFrame,
     d_thresh: float = 30,
-    min_size: int = 10,
+    min_size: int = 5,
     time_col: str = "t",
     xcol: str = "x", ycol: str = "y", zcol: str = "z",
     fluo_col: str = "mean_fluo",
@@ -247,6 +247,7 @@ def _feat_cos(a_row, b_row, **wkwargs):
         return 0.0
     return float(np.dot(av, bv) / (na * nb))
 
+
 def track_clusters_over_time(
     clusters_by_t: Dict[Any, List[dict]],
     link_metric: str = "overlap",   # "overlap" or "jaccard"
@@ -305,11 +306,11 @@ def track_clusters_over_time(
                     ang = _centroid_angle(pa["centroid_u"], cb["centroid_u"])
                     if ang > max_centroid_angle:
                         continue
-                if "member_track_id" not in pa or "member_track_id" not in cb:
-                    theta = cb["d_thresh"] / (0.5*cb["r"] + 0.5*pa["r"])
-                    set_sim = _spherical_overlap_iomin(pa["member_positions"], cb["member_positions"], tol_rad=theta)
-                else:
-                    set_sim = _set_sim(pa["member_track_id"], cb["member_track_id"], link_metric)
+                # if "member_track_id" not in pa or "member_track_id" not in cb:
+                theta = cb["d_thresh"] / (0.5*cb["r"] + 0.5*pa["r"])
+                set_sim = _spherical_overlap_iomin(pa["member_positions"], cb["member_positions"], tol_rad=theta)
+                # else:
+                #     set_sim = _set_sim(pa["member_track_id"], cb["member_track_id"], link_metric)
                 if set_sim < sim_min:
                     continue
                 feat = _feat_cos(pa, cb)
