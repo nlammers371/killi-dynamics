@@ -3,6 +3,7 @@ import pandas as pd
 from scipy.spatial import cKDTree
 from typing import Dict, List, Tuple, Any, Optional
 from tqdm import tqdm
+from dataclasses import dataclass
 # ---------- (unchanged) projection & graph helpers ----------
 
 # def _spherical_overlap(uA, uB, nside=128):
@@ -13,6 +14,27 @@ from tqdm import tqdm
 #     inter = len(setA & setB)
 #     if inter == 0: return 0.0
 #     return inter / min(len(setA), len(setB))
+
+@dataclass
+class ClusterTrackingConfig:
+    # ---- Linking and gating ----
+    link_metric: str = "overlap"     # geometric or set-based
+    sim_min: float = 0.4
+    max_centroid_angle: Optional[float] = np.deg2rad(20)
+    pred_step: float = 1.0
+    gap_max: int = 2
+    window: int = 0
+    max_iters: int = 3
+
+    # ---- Weights ----
+    w_sim: float = 1.0
+    w_feat: float = 0.5
+    w_pred: float = 0.5
+    w_size: float = 2.0
+
+    # ---- Geometry ----
+    d_thresh: float = 25.0
+    min_size: int = 5
 
 
 def _spherical_overlap_iomin(uA, uB, tol_rad):
@@ -102,6 +124,10 @@ def _cluster_stats_for_time(t_val, df_t, comps, u, r, d_thresh,
         fluo_mean    = float(np.nanmean(fluo_vals[nodes])) if size else np.nan
         deg_mean     = float(np.mean(deg[nodes])) if size else 0.0
         nn_dist_mean = float(np.nanmean(mean_nn_dist[nodes])) if size else np.nan
+        if "track_id" in df_t.columns:
+            member_track_ids = df_t.loc[row_idx, "track_id"].to_numpy()
+        else:
+            member_track_ids = None
 
         recs.append({
             "r": r,
@@ -116,8 +142,8 @@ def _cluster_stats_for_time(t_val, df_t, comps, u, r, d_thresh,
             "deg_mean": deg_mean,
             "nn_dist_mean": nn_dist_mean,
             "member_index": row_idx,
-            "member_positions": u,
-            # "member_track_id": df_t.loc[row_idx, "track_id"].to_numpy(),
+            "member_positions": u[nodes],
+            "member_track_id": member_track_ids,
             "centroid_u": m,   # NEW: unit-vector centroid for gating
         })
     return recs
@@ -125,21 +151,30 @@ def _cluster_stats_for_time(t_val, df_t, comps, u, r, d_thresh,
 def find_clusters_per_timepoint(
     tracks_df: pd.DataFrame,
     sphere_df: pd.DataFrame,
-    d_thresh: float = 30,
-    min_size: int = 5,
+    config: Optional[ClusterTrackingConfig] = None,
     time_col: str = "t",
     xcol: str = "x", ycol: str = "y", zcol: str = "z",
     fluo_col: str = "mean_fluo",
     sphere_time_col: str = "t",
-    sphere_center_cols=("center_x_smoothed", "center_x_smoothed", "center_x_smoothed"),
+    sphere_center_cols=("center_x_smoothed", "center_y_smoothed", "center_z_smoothed"),
     sphere_radius_col="r_smoothed"
 ) -> Dict[Any, List[dict]]:
+    """Detect spatial clusters on the spherical surface for each timepoint."""
+
+    if config is None:
+        config = ClusterTrackingConfig()
+
+    d_thresh = config.d_thresh
+    min_size = config.min_size
+
     sph = sphere_df.set_index(sphere_time_col)[list(sphere_center_cols)+[sphere_radius_col]]
     clusters_by_t: Dict[Any, List[dict]] = {}
 
-    for t_val, df_t in tqdm(tracks_df.groupby(time_col, sort=True), desc="Finding clusters per timepoint"):
+    for t_val, df_t in tqdm(tracks_df.groupby(time_col, sort=True),
+                            desc="Finding clusters per timepoint"):
         if t_val not in sph.index:
             continue
+
         xc, yc, zc = sph.loc[t_val, list(sphere_center_cols)].values
         r = float(sph.loc[t_val, sphere_radius_col])
 
@@ -156,20 +191,24 @@ def find_clusters_per_timepoint(
         mean_nn_dist = np.full(n, np.nan, float)
         for i, N in enumerate(neigh):
             Nn = [j for j in N if j != i]
-            if not Nn: continue
+            if not Nn:
+                continue
             dots = u[i] @ u[Nn].T
             dots = np.clip(dots, -1.0, 1.0)
             theta_ij = np.arccos(dots)
             mean_nn_dist[i] = float(np.mean(r * theta_ij))
 
         labels, comps = _connected_components_from_neighbors(neigh, min_size=min_size)
-        fluo_vals = df_t[fluo_col].to_numpy(dtype=float) if fluo_col in df_t.columns else np.full(len(df_t), np.nan)
+        fluo_vals = (df_t[fluo_col].to_numpy(dtype=float)
+                     if fluo_col in df_t.columns else np.full(len(df_t), np.nan))
 
-        recs = _cluster_stats_for_time(t_val, df_t, comps, u, r, d_thresh,
-                                       deg, mean_nn_dist, fluo_vals)
+        recs = _cluster_stats_for_time(
+            t_val, df_t, comps, u, r, d_thresh, deg, mean_nn_dist, fluo_vals
+        )
         clusters_by_t[t_val] = recs
 
     return clusters_by_t
+
 
 # ---------- new linker with metric choice, centroid gate, and merge handling ----------
 
@@ -250,22 +289,23 @@ def _feat_cos(a_row, b_row, **wkwargs):
 
 def track_clusters_over_time(
     clusters_by_t: Dict[Any, List[dict]],
-    link_metric: str = "overlap",   # "overlap" or "jaccard"
-    sim_min: float = 0.3,           # min set‑similarity to consider a link
-    max_centroid_angle: Optional[float] = None,  # radians; None disables hard gate
-    w_sim: float = 1.0,             # weight for set similarity
-    w_feat: float = 0.5,            # weight for feature cosine
-    w_pred: float = 0.5,            # weight for prediction proximity term
-    pred_step: float = 1.0,         # extrapolation step (frames)
-    carry_merge_parents: bool = True
+    config: Optional[ClusterTrackingConfig] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Motion‑ and feature‑aware linker with merge handling.
-    Returns (cluster_ts, merges_df).
-    """
+    """Link clusters across timepoints using geometric proximity and feature similarity."""
+
+    if config is None:
+        config = ClusterTrackingConfig()
+
+    link_metric = config.link_metric
+    sim_min = config.sim_min
+    max_centroid_angle = config.max_centroid_angle
+    w_sim, w_feat, w_pred = config.w_sim, config.w_feat, config.w_pred
+    pred_step = config.pred_step
+    carry_merge_parents = True  # retain same behavior
+
     times = sorted(clusters_by_t.keys())
     next_pid = 0
-    active: Dict[int, dict] = {}               # pid -> last record
+    active: Dict[int, dict] = {}
     prev_centroid: Dict[int, Optional[np.ndarray]] = {}
     prevprev_centroid: Dict[int, Optional[np.ndarray]] = {}
     rows = []
@@ -274,9 +314,10 @@ def track_clusters_over_time(
     for i, t in enumerate(tqdm(times, desc="Linking clusters over time")):
         curr = clusters_by_t[t]
 
-        if i == 0:
+        if i == 0 or not active:
             for c in curr:
-                pid = next_pid; next_pid += 1
+                pid = next_pid
+                next_pid += 1
                 active[pid] = c
                 prev_centroid[pid] = c["centroid_u"]
                 prevprev_centroid[pid] = None
@@ -285,78 +326,68 @@ def track_clusters_over_time(
 
         prev_pids = list(active.keys())
         P, C = len(prev_pids), len(curr)
-
-        if P == 0:
-            for c in curr:
-                pid = next_pid; next_pid += 1
-                active[pid] = c
-                prev_centroid[pid] = c["centroid_u"]
-                prevprev_centroid[pid] = None
-                rows.append({**c, "cluster_id": pid, "merged_from": []})
-            continue
-
-        # Build combined score matrix
-        # Score = w_sim * set_sim + w_feat * feat_cos + w_pred * pred_prox
         S = np.full((P, C), -np.inf, float)
+
         for a, pid in enumerate(prev_pids):
             pa = active[pid]
-            u_pred = _geodesic_extrapolate(prevprev_centroid[pid], prev_centroid[pid], step=pred_step)
+            u_pred = _geodesic_extrapolate(prevprev_centroid[pid],
+                                           prev_centroid[pid],
+                                           step=pred_step)
             for b, cb in enumerate(curr):
                 if max_centroid_angle is not None:
                     ang = _centroid_angle(pa["centroid_u"], cb["centroid_u"])
                     if ang > max_centroid_angle:
                         continue
-                # if "member_track_id" not in pa or "member_track_id" not in cb:
-                theta = cb["d_thresh"] / (0.5*cb["r"] + 0.5*pa["r"])
-                set_sim = _spherical_overlap_iomin(pa["member_positions"], cb["member_positions"], tol_rad=theta)
-                # else:
-                #     set_sim = _set_sim(pa["member_track_id"], cb["member_track_id"], link_metric)
+
+                # geometric overlap
+                theta = cb["d_thresh"] / (0.5 * cb["r"] + 0.5 * pa["r"])
+                set_sim = _spherical_overlap_iomin(pa["member_positions"],
+                                                   cb["member_positions"],
+                                                   tol_rad=theta)
                 if set_sim < sim_min:
                     continue
+
                 feat = _feat_cos(pa, cb)
-                # prediction proximity as cosine of angle between prediction and candidate centroid
-                pred_cos = float(np.clip(np.dot(u_pred, cb["centroid_u"]), -1.0, 1.0)) if u_pred is not None else 0.0
-                score = w_sim*set_sim + w_feat*feat + w_pred*pred_cos
+                pred_cos = float(np.clip(np.dot(u_pred, cb["centroid_u"]),
+                                         -1.0, 1.0)) if u_pred is not None else 0.0
+                score = w_sim * set_sim + w_feat * feat + w_pred * pred_cos
                 S[a, b] = score
 
-        # Greedy assign by descending score (more stable than Hungarian with mixed terms)
+        # greedy assignment
         pairs = []
         used_prev, used_curr = set(), set()
-        # flatten valid scores
-        flat = [(S[a, b], a, b) for a in range(P) for b in range(C) if np.isfinite(S[a, b])]
+        flat = [(S[a, b], a, b) for a in range(P) for b in range(C)
+                if np.isfinite(S[a, b])]
         flat.sort(reverse=True)
         for sc, a, b in flat:
             if a in used_prev or b in used_curr:
                 continue
             pairs.append((a, b, sc))
-            used_prev.add(a); used_curr.add(b)
+            used_prev.add(a)
+            used_curr.add(b)
 
-        # Link primaries; detect merges (other qualifying prev that point to same curr)
-        # Build reverse map: for each curr b, find all prev a with acceptable similarity
+        # build reverse supporters map
         supporters = {b: [] for b in range(C)}
         for a in range(P):
             for b in range(C):
                 if np.isfinite(S[a, b]):
                     supporters[b].append(a)
 
-        # Apply links
+        # apply links
         for a, b, _ in pairs:
             pid = prev_pids[a]
             c = curr[b]
-            # continue track
             active[pid] = c
             rows.append({**c, "cluster_id": pid, "merged_from": []})
-            # update motion buffers
             prevprev_centroid[pid] = prev_centroid[pid]
             prev_centroid[pid] = c["centroid_u"]
 
-            # MERGES: any other supporters (not the primary) get merged/closed
+            # merges
             others = [aa for aa in supporters[b] if aa != a]
             if others and carry_merge_parents:
                 parents = []
                 for aa in others:
                     pid_other = prev_pids[aa]
-                    # close track if still active and not linked elsewhere
                     if pid_other in active:
                         merges.append({"t": t, "merged_into": pid, "merged_from": pid_other})
                         active.pop(pid_other, None)
@@ -364,64 +395,60 @@ def track_clusters_over_time(
                 if parents:
                     rows[-1]["merged_from"] = parents
 
-        # Unassigned current → new tracks
+        # new clusters
         for b, c in enumerate(curr):
             if b not in used_curr:
-                pid = next_pid; next_pid += 1
+                pid = next_pid
+                next_pid += 1
                 active[pid] = c
                 prev_centroid[pid] = c["centroid_u"]
                 prevprev_centroid[pid] = None
                 rows.append({**c, "cluster_id": pid, "merged_from": []})
 
-        # Any prev not updated this frame are ended
+        # deactivate old
         for a, pid in enumerate(prev_pids):
             if a not in used_prev and pid in active and active[pid]["t"] < t:
                 active.pop(pid, None)
                 prev_centroid.pop(pid, None)
                 prevprev_centroid.pop(pid, None)
 
-    # Assemble TS + summaries
+    # assemble TS and summaries
     df_ts = pd.DataFrame(rows)
     stats = (df_ts.groupby("cluster_id")
-             .agg(start_t=("t","min"), end_t=("t","max"),
+             .agg(start_t=("t", "min"), end_t=("t", "max"),
                   duration=("t", lambda v: v.max()-v.min()+1),
-                  mean_size=("size","mean"),
-                  max_size=("size","max"),
-                  mean_fluo=("fluo_mean","mean"),
-                  mean_deg=("deg_mean","mean"),
-                  mean_nn_dist=("nn_dist_mean","mean"),
-                  n_obs=("t","count"))
+                  mean_size=("size", "mean"),
+                  max_size=("size", "max"),
+                  mean_fluo=("fluo_mean", "mean"),
+                  mean_deg=("deg_mean", "mean"),
+                  mean_nn_dist=("nn_dist_mean", "mean"),
+                  n_obs=("t", "count"))
              .reset_index())
     df_ts = df_ts.merge(stats, on="cluster_id", how="left")
     merges_df = pd.DataFrame(merges, columns=["t","merged_into","merged_from"])
     return df_ts, merges_df
 
 
+
 # ---------- main stitcher ----------
 
 def stitch_tracklets(
-        cluster_ts: pd.DataFrame,
-        gap_max: int = 2,  # max temporal gap (frames) to bridge
-        window: int = 0,  # +/- frames around endpoints to search for best overlap
-        link_metric: str = "overlap",  # "overlap" or "jaccard"
-        sim_min: float = 0.3,  # min set-similarity to consider a stitch
-        max_centroid_angle: float | None = np.deg2rad(20),  # None disables gate
-        w_sim: float = 1.0,  # weight: set similarity
-        w_feat: float = 0.5,  # weight: feature cosine
-        w_pred: float = 0.5,  # weight: prediction proximity
-        pred_step: float = 1.0,  # step for geodesic extrapolation
-        w_size: float = 2.0,  # size up-weight inside feature vector
-        max_iters: int = 3  # repeat stitching passes
+    cluster_ts: pd.DataFrame,
+    config: Optional[ClusterTrackingConfig] = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Stitch fragmented cluster tracklets across small temporal gaps by remapping child
-    tracklet cluster_ids to parent ones using a multi-term score.
 
-    Returns
-    -------
-    stitched_ts : cluster_ts with 'cluster_id_stitched' column
-    stitch_log  : DataFrame with [parent_id, child_id, parent_seg, child_seg, score, delta_t]
-    """
+    if config is None:
+        config = ClusterTrackingConfig()
+
+    # link_metric = config.link_metric
+    sim_min = config.sim_min
+    max_centroid_angle = config.max_centroid_angle
+    gap_max = config.gap_max
+    window = config.window
+    w_sim, w_feat, w_pred, w_size = config.w_sim, config.w_feat, config.w_pred, config.w_size
+    pred_step = config.pred_step
+    max_iters = config.max_iters
+    d_thresh = config.d_thresh
 
     df = cluster_ts.copy()
 
@@ -430,120 +457,121 @@ def stitch_tracklets(
     for cid, d in tqdm(df.groupby("cluster_id"), desc="Stitching tracklets"):
         tt = d.sort_values("t")
         times = tt["t"].to_numpy()
-        # segment breaks where t jumps > 1
         breaks = np.where(np.diff(times) > 1)[0]
-        # indices for segment boundaries
         starts = np.r_[0, breaks + 1]
         ends = np.r_[breaks, len(times) - 1]
         for s_idx, e_idx in zip(starts, ends):
             seg = tt.iloc[s_idx:e_idx + 1].copy()
             seg_rows.append({
                 "cluster_id": cid,
-                "seg_idx": len([r for r in seg_rows if r["cluster_id"] == cid]),  # local index
+                "seg_idx": len([r for r in seg_rows if r["cluster_id"] == cid]),
                 "t_start": int(seg["t"].iloc[0]),
                 "t_end": int(seg["t"].iloc[-1]),
                 "len": int(seg.shape[0]),
-                "rows": seg  # keep the slice for boundary access
+                "rows": seg
             })
     seg_df = pd.DataFrame(seg_rows)
 
-    # Current mapping from original cluster_id to stitched id (initially identity)
     id_map = {cid: cid for cid in df["cluster_id"].unique()}
 
-    # Utility: get set similarity at boundaries with optional window
-    def boundary_set_sim(a_rows: pd.DataFrame, b_rows: pd.DataFrame) -> float:
-        # choose metric
-        simfun = _overlap_coeff if link_metric == "overlap" else _jaccard
-        a_times = a_rows["t"].to_numpy()
-        b_times = b_rows["t"].to_numpy()
-        # target endpoints
-        a_end = a_times.max()
-        b_start = b_times.min()
-        best = 0.0
-        for dt_a in range(-window, window + 1):
-            for dt_b in range(-window, window + 1):
-                ta = a_end + dt_a
-                tb = b_start + dt_b
-                if ta in a_times and tb in b_times:
-                    A = a_rows.loc[a_rows["t"] == ta, "member_track_id"].iloc[0]
-                    B = b_rows.loc[b_rows["t"] == tb, "member_track_id"].iloc[0]
-                    best = max(best, simfun(A, B))
-        return best
+    # --- utilities ------------------------------------------------------------
+    def boundary_set_sim(a_rows, b_rows) -> float:
+        """Wrapper using spherical overlap for endpoint clusters."""
+        ta = a_rows["t"].max()
+        tb = b_rows["t"].min()
+        A = np.vstack(a_rows.loc[a_rows["t"] == ta, "member_positions"].iloc[0])
+        B = np.vstack(b_rows.loc[b_rows["t"] == tb, "member_positions"].iloc[0])
+        r_mean = 0.5 * (a_rows["r"].iloc[0] + b_rows["r"].iloc[0])
+        theta = config.d_thresh / r_mean
+        return _spherical_overlap_iomin(A, B, tol_rad=theta)
 
-    # Utility: feature cosine between end of A and start of B
     def boundary_feat_cos(a_rows: pd.DataFrame, b_rows: pd.DataFrame) -> float:
         ar = a_rows.loc[a_rows["t"] == a_rows["t"].max()].iloc[0].to_dict()
         br = b_rows.loc[b_rows["t"] == b_rows["t"].min()].iloc[0].to_dict()
         return _feat_cos(ar, br, w_size=w_size)
 
-    # Utility: prediction proximity using last two centroids of A and first of B
     def boundary_pred_cos(a_rows: pd.DataFrame, b_rows: pd.DataFrame) -> float:
         a_sorted = a_rows.sort_values("t")
-        if a_sorted.shape[0] >= 2:
-            u_prevprev = np.array(a_sorted.iloc[-2]["centroid_u"])
-        else:
-            u_prevprev = None
+        u_prevprev = np.array(a_sorted.iloc[-2]["centroid_u"]) if a_sorted.shape[0] >= 2 else None
         u_prev = np.array(a_sorted.iloc[-1]["centroid_u"])
         u_pred = _geodesic_extrapolate(u_prevprev, u_prev, step=pred_step)
         u_b = np.array(b_rows.sort_values("t").iloc[0]["centroid_u"])
         return float(np.clip(np.dot(u_pred, u_b), -1.0, 1.0))
 
+    # --- main stitching loop ---------------------------------------------------
+
+    # Pre-extract scalars and centroids once
+    seg_array = seg_df.to_dict("records")
+    t_start = np.array([s["t_start"] for s in seg_array])
+    t_end = np.array([s["t_end"] for s in seg_array])
+    # cluster_id_vec = np.array([s["cluster_id"] for s in seg_array])
+
+    # Cache endpoint centroids for angular gating
+    u_end = [np.array(s["rows"].iloc[-1]["centroid_u"]) for s in seg_array]
+    u_start = [np.array(s["rows"].iloc[0]["centroid_u"]) for s in seg_array]
+
     stitch_events = []
 
     for it in range(max_iters):
         stitched_any = False
-
-        # Build candidate pair list (A ends before B starts; gap ≤ gap_max)
         cand = []
-        for ia, A in seg_df.iterrows():
-            for ib, B in seg_df.iterrows():
-                if A["cluster_id"] == B["cluster_id"]:
+
+        # Sort by t_end to allow fast filtering by time window
+        order = np.argsort(t_end)
+        for idx_a in tqdm(order, desc=f"Stitch pass {it+1}/{max_iters}", leave=False):
+            # A = seg_array[idx_a]
+            tA_end = t_end[idx_a]
+
+            # Potential successors start after A.t_end
+            mask = (t_start > tA_end) & (t_start <= tA_end + gap_max + 1)
+            if not np.any(mask):
+                continue
+
+            for idx_b in np.where(mask)[0]:
+
+                gap = t_start[idx_b] - tA_end - 1
+
+                # centroid angle gate (cheap)
+                if max_centroid_angle is not None:
+                    ang = _centroid_angle(u_end[idx_a], u_start[idx_b])
+                    if ang > max_centroid_angle:
+                        continue
+
+                # Heavy terms only for viable pairs
+                A_rows = seg_array[idx_a]["rows"]
+                B_rows = seg_array[idx_b]["rows"]
+                sim = boundary_set_sim(A_rows, B_rows)
+                if sim < sim_min:
                     continue
-                if A["t_end"] < B["t_start"]:
-                    gap = B["t_start"] - A["t_end"] - 1
-                    if 0 <= gap <= gap_max:
-                        # centroid gate (optional)
-                        if max_centroid_angle is not None:
-                            uA = np.array(A["rows"].iloc[-1]["centroid_u"])
-                            uB = np.array(B["rows"].iloc[0]["centroid_u"])
-                            if _centroid_angle(uA, uB) > max_centroid_angle:
-                                continue
-                        # set similarity (required min)
-                        sim = boundary_set_sim(A["rows"], B["rows"])
-                        if sim < sim_min:
-                            continue
-                        feat = boundary_feat_cos(A["rows"], B["rows"])
-                        pred = boundary_pred_cos(A["rows"], B["rows"])
-                        score = w_sim * sim + w_feat * feat + w_pred * pred
-                        cand.append((score, ia, ib, gap, sim, feat, pred))
+
+                feat = boundary_feat_cos(A_rows, B_rows)
+                pred = boundary_pred_cos(A_rows, B_rows)
+                score = w_sim * sim + w_feat * feat + w_pred * pred
+                cand.append((score, idx_a, idx_b, gap, sim, feat, pred))
 
         if not cand:
             break
 
-        # Greedy, highest score first, without conflicts (each seg can be used once per iter)
         cand.sort(reverse=True, key=lambda t: t[0])
         used_A, used_B = set(), set()
+
         for score, ia, ib, gap, sim, feat, pred in cand:
             if ia in used_A or ib in used_B:
                 continue
-            A = seg_df.loc[ia];
+            A = seg_df.loc[ia]
             B = seg_df.loc[ib]
-
-            # Remap child (B.cluster_id) → parent (A.cluster_id)
             parent_id = id_map[A["cluster_id"]]
             child_id = id_map[B["cluster_id"]]
             if parent_id == child_id:
-                used_A.add(ia);
+                used_A.add(ia)
                 used_B.add(ib)
                 continue
 
-            # Apply relabel in df and seg_df
             df.loc[df["cluster_id"] == child_id, "cluster_id"] = parent_id
             id_map = {old: (parent_id if new == child_id else new)
                       for old, new in id_map.items()}
 
-            # mark and log
-            used_A.add(ia);
+            used_A.add(ia)
             used_B.add(ib)
             stitched_any = True
             stitch_events.append({
@@ -562,7 +590,7 @@ def stitch_tracklets(
         if not stitched_any:
             break
 
-        # Recompute segments after relabeling (so next iteration can chain)
+        # recompute segments after relabeling
         seg_rows = []
         for cid, d in df.groupby("cluster_id"):
             tt = d.sort_values("t")
@@ -582,10 +610,7 @@ def stitch_tracklets(
                 })
         seg_df = pd.DataFrame(seg_rows)
 
-    # Recompute per-cluster summaries and attach new ID
-    stitched_ts = df.copy()
-    stitched_ts = (stitched_ts
-                   .rename(columns={"cluster_id": "cluster_id_stitched"}))
+    stitched_ts = df.rename(columns={"cluster_id": "cluster_id_stitched"}).copy()
     stats = (stitched_ts.groupby("cluster_id_stitched")
              .agg(start_t=("t", "min"), end_t=("t", "max"),
                   duration=("t", lambda v: v.max() - v.min() + 1),
@@ -597,7 +622,7 @@ def stitch_tracklets(
                   n_obs=("t", "count"))
              .reset_index())
     stitched_ts = stitched_ts.merge(stats, on="cluster_id_stitched", how="left")
-
     stitch_log = pd.DataFrame(stitch_events)
     return stitched_ts, stitch_log
+
 
