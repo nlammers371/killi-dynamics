@@ -1,5 +1,5 @@
 link_metric: overlap
-sim_min: 0.3
+sim_min: 0.4
 max_centroid_angle: 0.3490658503988659
 pred_step: 1.0
 gap_max: 2
@@ -9,5 +9,5 @@ w_sim: 1.0
 w_feat: 0.5
 w_pred: 0.5
 w_size: 2.0
-d_thresh: 30.0
+d_thresh: 25.0
 min_size: 5

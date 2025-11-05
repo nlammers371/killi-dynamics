@@ -440,19 +440,23 @@ def stitch_tracklets(
     if config is None:
         config = ClusterTrackingConfig()
 
-    # link_metric = config.link_metric
     sim_min = config.sim_min
     max_centroid_angle = config.max_centroid_angle
     gap_max = config.gap_max
-    window = config.window
-    w_sim, w_feat, w_pred, w_size = config.w_sim, config.w_feat, config.w_pred, config.w_size
+    window = config.window  # currently only used inside boundary_* if you add it back
+    w_sim, w_feat, w_pred, w_size = (
+        config.w_sim,
+        config.w_feat,
+        config.w_pred,
+        config.w_size,
+    )
     pred_step = config.pred_step
     max_iters = config.max_iters
     d_thresh = config.d_thresh
 
     df = cluster_ts.copy()
 
-    # Build per-cluster contiguous segments (tracklets)
+    # ---------- initial segment build ----------
     seg_rows = []
     for cid, d in tqdm(df.groupby("cluster_id"), desc="Stitching tracklets"):
         tt = d.sort_values("t")
@@ -461,28 +465,42 @@ def stitch_tracklets(
         starts = np.r_[0, breaks + 1]
         ends = np.r_[breaks, len(times) - 1]
         for s_idx, e_idx in zip(starts, ends):
-            seg = tt.iloc[s_idx:e_idx + 1].copy()
-            seg_rows.append({
-                "cluster_id": cid,
-                "seg_idx": len([r for r in seg_rows if r["cluster_id"] == cid]),
-                "t_start": int(seg["t"].iloc[0]),
-                "t_end": int(seg["t"].iloc[-1]),
-                "len": int(seg.shape[0]),
-                "rows": seg
-            })
-    seg_df = pd.DataFrame(seg_rows)
+            seg = tt.iloc[s_idx : e_idx + 1].copy()
+            seg_rows.append(
+                {
+                    "cluster_id": cid,
+                    "seg_idx": len([r for r in seg_rows if r["cluster_id"] == cid]),
+                    "t_start": int(seg["t"].iloc[0]),
+                    "t_end": int(seg["t"].iloc[-1]),
+                    "len": int(seg.shape[0]),
+                    "rows": seg,
+                }
+            )
+    seg_df = pd.DataFrame(seg_rows).reset_index(drop=True)
 
+    # map from current cluster_id → stitched id (starts as identity)
     id_map = {cid: cid for cid in df["cluster_id"].unique()}
 
-    # --- utilities ------------------------------------------------------------
+    # ---------- helper to (re)build caches from seg_df ----------
+    def _build_seg_cache(seg_df: pd.DataFrame):
+        seg_array = seg_df.to_dict("records")
+        t_start = np.array([s["t_start"] for s in seg_array])
+        t_end = np.array([s["t_end"] for s in seg_array])
+        # endpoint centroids
+        u_end = [np.array(s["rows"].iloc[-1]["centroid_u"]) for s in seg_array]
+        u_start = [np.array(s["rows"].iloc[0]["centroid_u"]) for s in seg_array]
+        return seg_array, t_start, t_end, u_end, u_start
+
+    seg_array, t_start, t_end, u_end, u_start = _build_seg_cache(seg_df)
+
+    # ---------- boundary utilities ----------
     def boundary_set_sim(a_rows, b_rows) -> float:
-        """Wrapper using spherical overlap for endpoint clusters."""
         ta = a_rows["t"].max()
         tb = b_rows["t"].min()
         A = np.vstack(a_rows.loc[a_rows["t"] == ta, "member_positions"].iloc[0])
         B = np.vstack(b_rows.loc[b_rows["t"] == tb, "member_positions"].iloc[0])
         r_mean = 0.5 * (a_rows["r"].iloc[0] + b_rows["r"].iloc[0])
-        theta = config.d_thresh / r_mean
+        theta = d_thresh / r_mean
         return _spherical_overlap_iomin(A, B, tol_rad=theta)
 
     def boundary_feat_cos(a_rows: pd.DataFrame, b_rows: pd.DataFrame) -> float:
@@ -492,54 +510,44 @@ def stitch_tracklets(
 
     def boundary_pred_cos(a_rows: pd.DataFrame, b_rows: pd.DataFrame) -> float:
         a_sorted = a_rows.sort_values("t")
-        u_prevprev = np.array(a_sorted.iloc[-2]["centroid_u"]) if a_sorted.shape[0] >= 2 else None
+        u_prevprev = (
+            np.array(a_sorted.iloc[-2]["centroid_u"])
+            if a_sorted.shape[0] >= 2
+            else None
+        )
         u_prev = np.array(a_sorted.iloc[-1]["centroid_u"])
         u_pred = _geodesic_extrapolate(u_prevprev, u_prev, step=pred_step)
         u_b = np.array(b_rows.sort_values("t").iloc[0]["centroid_u"])
         return float(np.clip(np.dot(u_pred, u_b), -1.0, 1.0))
 
-    # --- main stitching loop ---------------------------------------------------
-
-    # Pre-extract scalars and centroids once
-    seg_array = seg_df.to_dict("records")
-    t_start = np.array([s["t_start"] for s in seg_array])
-    t_end = np.array([s["t_end"] for s in seg_array])
-    # cluster_id_vec = np.array([s["cluster_id"] for s in seg_array])
-
-    # Cache endpoint centroids for angular gating
-    u_end = [np.array(s["rows"].iloc[-1]["centroid_u"]) for s in seg_array]
-    u_start = [np.array(s["rows"].iloc[0]["centroid_u"]) for s in seg_array]
-
     stitch_events = []
 
+    # ---------- main stitching loop ----------
     for it in range(max_iters):
         stitched_any = False
         cand = []
 
-        # Sort by t_end to allow fast filtering by time window
         order = np.argsort(t_end)
-        for idx_a in tqdm(order, desc=f"Stitch pass {it+1}/{max_iters}", leave=False):
-            # A = seg_array[idx_a]
+        for idx_a in tqdm(
+            order, desc=f"Stitch pass {it+1}/{max_iters}", leave=False
+        ):
             tA_end = t_end[idx_a]
 
-            # Potential successors start after A.t_end
+            # only look at segments that start shortly after this one ends
             mask = (t_start > tA_end) & (t_start <= tA_end + gap_max + 1)
             if not np.any(mask):
                 continue
 
             for idx_b in np.where(mask)[0]:
-
-                gap = t_start[idx_b] - tA_end - 1
-
-                # centroid angle gate (cheap)
+                # optional centroid gate
                 if max_centroid_angle is not None:
                     ang = _centroid_angle(u_end[idx_a], u_start[idx_b])
                     if ang > max_centroid_angle:
                         continue
 
-                # Heavy terms only for viable pairs
                 A_rows = seg_array[idx_a]["rows"]
                 B_rows = seg_array[idx_b]["rows"]
+
                 sim = boundary_set_sim(A_rows, B_rows)
                 if sim < sim_min:
                     continue
@@ -547,19 +555,24 @@ def stitch_tracklets(
                 feat = boundary_feat_cos(A_rows, B_rows)
                 pred = boundary_pred_cos(A_rows, B_rows)
                 score = w_sim * sim + w_feat * feat + w_pred * pred
+                gap = t_start[idx_b] - tA_end - 1
                 cand.append((score, idx_a, idx_b, gap, sim, feat, pred))
 
         if not cand:
             break
 
+        # pick non-conflicting best candidates
         cand.sort(reverse=True, key=lambda t: t[0])
         used_A, used_B = set(), set()
 
         for score, ia, ib, gap, sim, feat, pred in cand:
             if ia in used_A or ib in used_B:
                 continue
-            A = seg_df.loc[ia]
-            B = seg_df.loc[ib]
+
+            # NOTE: use iloc for both, since ia/ib are positional
+            A = seg_df.iloc[ia]
+            B = seg_df.iloc[ib]
+
             parent_id = id_map[A["cluster_id"]]
             child_id = id_map[B["cluster_id"]]
             if parent_id == child_id:
@@ -567,30 +580,36 @@ def stitch_tracklets(
                 used_B.add(ib)
                 continue
 
+            # relabel in main df
             df.loc[df["cluster_id"] == child_id, "cluster_id"] = parent_id
-            id_map = {old: (parent_id if new == child_id else new)
-                      for old, new in id_map.items()}
+            # update id_map so future references to child's id map to parent
+            id_map = {
+                old: (parent_id if new == child_id else new)
+                for old, new in id_map.items()
+            }
 
             used_A.add(ia)
             used_B.add(ib)
             stitched_any = True
-            stitch_events.append({
-                "iter": it,
-                "parent_id": parent_id,
-                "child_id": child_id,
-                "parent_seg": (int(A["cluster_id"]), int(A["seg_idx"])),
-                "child_seg": (int(B["cluster_id"]), int(B["seg_idx"])),
-                "score": float(score),
-                "gap": int(gap),
-                "sim": float(sim),
-                "feat_cos": float(feat),
-                "pred_cos": float(pred)
-            })
+            stitch_events.append(
+                {
+                    "iter": it,
+                    "parent_id": parent_id,
+                    "child_id": child_id,
+                    "parent_seg": (int(A["cluster_id"]), int(A["seg_idx"])),
+                    "child_seg": (int(B["cluster_id"]), int(B["seg_idx"])),
+                    "score": float(score),
+                    "gap": int(gap),
+                    "sim": float(sim),
+                    "feat_cos": float(feat),
+                    "pred_cos": float(pred),
+                }
+            )
 
         if not stitched_any:
             break
 
-        # recompute segments after relabeling
+        # ---------- rebuild segments AFTER relabeling ----------
         seg_rows = []
         for cid, d in df.groupby("cluster_id"):
             tt = d.sort_values("t")
@@ -599,30 +618,43 @@ def stitch_tracklets(
             starts = np.r_[0, breaks + 1]
             ends = np.r_[breaks, len(times) - 1]
             for s_idx, e_idx in zip(starts, ends):
-                seg = tt.iloc[s_idx:e_idx + 1].copy()
-                seg_rows.append({
-                    "cluster_id": cid,
-                    "seg_idx": len([r for r in seg_rows if r["cluster_id"] == cid]),
-                    "t_start": int(seg["t"].iloc[0]),
-                    "t_end": int(seg["t"].iloc[-1]),
-                    "len": int(seg.shape[0]),
-                    "rows": seg
-                })
-        seg_df = pd.DataFrame(seg_rows)
+                seg = tt.iloc[s_idx : e_idx + 1].copy()
+                seg_rows.append(
+                    {
+                        "cluster_id": cid,
+                        "seg_idx": len(
+                            [r for r in seg_rows if r["cluster_id"] == cid]
+                        ),
+                        "t_start": int(seg["t"].iloc[0]),
+                        "t_end": int(seg["t"].iloc[-1]),
+                        "len": int(seg.shape[0]),
+                        "rows": seg,
+                    }
+                )
+        seg_df = pd.DataFrame(seg_rows).reset_index(drop=True)
 
+        seg_array, t_start, t_end, u_end, u_start = _build_seg_cache(seg_df)
+
+    # ---------- final formatting ----------
     stitched_ts = df.rename(columns={"cluster_id": "cluster_id_stitched"}).copy()
-    stats = (stitched_ts.groupby("cluster_id_stitched")
-             .agg(start_t=("t", "min"), end_t=("t", "max"),
-                  duration=("t", lambda v: v.max() - v.min() + 1),
-                  mean_size=("size", "mean"),
-                  max_size=("size", "max"),
-                  mean_fluo=("fluo_mean", "mean"),
-                  mean_deg=("deg_mean", "mean"),
-                  mean_nn_dist=("nn_dist_mean", "mean"),
-                  n_obs=("t", "count"))
-             .reset_index())
+    stats = (
+        stitched_ts.groupby("cluster_id_stitched")
+        .agg(
+            start_t=("t", "min"),
+            end_t=("t", "max"),
+            duration=("t", lambda v: v.max() - v.min() + 1),
+            mean_size=("size", "mean"),
+            max_size=("size", "max"),
+            mean_fluo=("fluo_mean", "mean"),
+            mean_deg=("deg_mean", "mean"),
+            mean_nn_dist=("nn_dist_mean", "mean"),
+            n_obs=("t", "count"),
+        )
+        .reset_index()
+    )
     stitched_ts = stitched_ts.merge(stats, on="cluster_id_stitched", how="left")
     stitch_log = pd.DataFrame(stitch_events)
     return stitched_ts, stitch_log
+
 
 
