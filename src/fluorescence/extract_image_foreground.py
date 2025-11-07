@@ -112,7 +112,7 @@ def extract_foreground_intensities(
         fg_root.attrs.update({
             "description": "Sparse per-frame foreground voxel coordinates and intensities",
             "n_channels": n_channels,
-            "voxel_size_um": scale_vec.tolist(),
+            "voxel_size_um": list(scale_vec),
         })
         written_t = set()
     else:
@@ -130,7 +130,7 @@ def extract_foreground_intensities(
             fg_root.attrs.update({
                 "description": "Sparse per-frame foreground voxel coordinates and intensities",
                 "n_channels": n_channels,
-                "voxel_size_um": scale_vec.tolist(),
+                "voxel_size_um": list(scale_vec),
             })
             written_t = set()
         else:
@@ -164,7 +164,7 @@ def extract_foreground_intensities(
                     chunksize=1,
                     desc="Extracting foreground intensities...")
     else:
-        for t in tqdm(tp_write, desc="Extracting foreground intensities..."):
+        for t in tqdm(to_write, desc="Extracting foreground intensities..."):
             call_extract_foreground(t)
 
     print(f"[extract_foreground_intensities] Done — stored under {mask_store_path}/{side_spec}/{fg_group_name}")
