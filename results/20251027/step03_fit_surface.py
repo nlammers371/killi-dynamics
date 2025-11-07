@@ -12,10 +12,11 @@ if __name__ == '__main__':
     project_name = "20251019_BC1-NLS_52-80hpf"
     seg_type = "li_segmentation"
 
-    # sphere_df = fit_surf_sphere_trend(root=root,
-    #                                   project_name=project_name,
-    #                                   seg_type="li_segmentation",
-    #                                   n_workers=12)
+    sphere_df = fit_surf_sphere_trend(root=root,
+                                      overwrite=True,
+                                      project_name=project_name,
+                                      seg_type="li_segmentation",
+                                      n_workers=12)
 
     # fit_sh_trend(root=root,
     #              project_name=project_name,
