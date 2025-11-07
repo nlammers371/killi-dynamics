@@ -2,6 +2,26 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 from src.data_io.zarr_io import open_experiment_array
+import re
+import ast
+
+def parse_member_ids(x):
+    """Convert malformed string lists like '[1 2 5]' → [1,2,5]."""
+    if isinstance(x, list):
+        return x
+    if not isinstance(x, str) or not x.strip():
+        return np.nan
+    s = x.strip().strip('[]')
+    if not s:
+        return []
+    # replace commas or multiple spaces with single space
+    s = re.sub(r'[,]+', ' ', s)
+    parts = re.split(r'\s+', s.strip())
+    try:
+        return [int(p) for p in parts if p]
+    except ValueError:
+        # fallback if something weird slipped in
+        return [p for p in parts if p]
 
 def _load_tracks(root: Path,
                  project_name: str,
@@ -74,6 +94,25 @@ def _load_track_data(root: Path,
         fluo_df = pd.read_csv(fluo_file)
         fluo_df = fluo_df[fluo_df["channel"] == fluo_channel_to_use]
         tracks = tracks.merge(fluo_df, on=["track_id", "t"], how="left")
+
+    # check for cluster tracking data
+    cluster_path = root / "symmetry_breaking" / project_name / tracking_config / "cell_clusters_stitched.csv"
+    if cluster_path.is_file():
+        cluster_df = pd.read_csv(cluster_path)
+
+        cluster_df["member_track_id"] = cluster_df["member_track_id"].apply(parse_member_ids)
+
+        cluster_assignments = (
+            cluster_df[["t", "cluster_id_stitched", "member_track_id"]]
+            .explode("member_track_id")
+            .rename(columns={"member_track_id": "track_id"})
+        )
+
+        # ensure numeric dtype if possible
+        cluster_assignments["track_id"] = pd.to_numeric(cluster_assignments["track_id"], errors="coerce").astype(
+            "Int64")
+
+        tracks = tracks.merge(cluster_assignments, on=["t", "track_id"], how="left")
 
     # sphere data
     sphere_path = root / "surf_stats" / f"{project_name}_surf_stats.zarr" / "surf_fits" / "sphere_fits.csv"

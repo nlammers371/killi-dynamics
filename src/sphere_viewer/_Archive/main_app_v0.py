@@ -11,6 +11,46 @@ from functools import partial
 from scipy.spatial import SphericalVoronoi
 import trimesh
 
+from magicgui import magicgui
+
+def add_interactive_controls(viewer, tracks, track_id_map, verts, faces, show_patches,
+                             show_points, sphere_df, cell_radius, use_dual_layer):
+    @magicgui(
+        quant_var={"choices": list(tracks.columns)},
+        edge_var={"choices": list(tracks.columns)},
+        point_var={"choices": list(tracks.columns)},
+        call_button="Update Layers",
+    )
+    def controls(quant_var="quant_var", edge_var="velocity", point_var="quant_var"):
+        # Remove old layers if present
+        for name in ["cell_patches", "borders", "points"]:
+            for layer in list(viewer.layers):
+                if name in layer.name:
+                    viewer.layers.remove(layer)
+
+        if show_patches:
+            # Re-add surfaces and points
+            add_cell_patches_layer(
+                viewer,
+                verts, faces, track_id_map,
+                tracks,
+                quant_var=quant_var,
+                edge_var=edge_var,
+                use_dual_layer=use_dual_layer,
+                edge_colormap="magma",
+            )
+        if show_points:
+            add_timeaware_points_layer(
+                viewer,
+                tracks,
+                sphere_df=sphere_df,
+                quant_var=point_var,
+                size=cell_radius * 0.5 if show_patches else 2*cell_radius,
+            )
+
+    viewer.window.add_dock_widget(controls, area="right")
+
+
 def make_intermediate_sphere(subdiv=8, keep_fraction=0.5, radius=1.0):
     base = trimesh.creation.icosphere(subdivisions=subdiv, radius=radius)
     verts = base.vertices
@@ -337,6 +377,7 @@ def launch_sphere_viewer(tracks,
                          quant_var="quant_var",
                          edge_var=None,
                          show_points=False,
+                         show_patches=True,
                          show_tracks=False,
                          cell_radius=12.5,
                          use_dual_layer=False,
@@ -349,23 +390,26 @@ def launch_sphere_viewer(tracks,
     viewer = napari.Viewer(ndisplay=3)
 
     print("Generating sphere mesh...")
-    verts, faces = make_dense_sphere_mesh(subdiv=sphere_subdiv)
-    # verts, faces = make_intermediate_sphere(subdiv=8, keep_fraction=0.5)
+    verts, faces = None, None
+    track_id_map = []
+    if show_patches:
+        verts, faces = make_dense_sphere_mesh(subdiv=sphere_subdiv)
+        # verts, faces = make_intermediate_sphere(subdiv=8, keep_fraction=0.5)
 
-    track_id_map = compute_track_id_map(
-                                        tracks=tracks,
-                                        sphere_df=sphere,
-                                        base_verts=verts,
-                                        cell_radius_max=cell_radius,
-                                        n_workers=n_workers,
-                                    )
+        track_id_map = compute_track_id_map(
+                                            tracks=tracks,
+                                            sphere_df=sphere,
+                                            base_verts=verts,
+                                            cell_radius_max=cell_radius,
+                                            n_workers=n_workers,
+                                        )
 
-    add_cell_patches_layer(viewer, verts, faces, track_id_map,
-                           tracks, quant_var,
-                           edge_var=edge_var,
-                           use_dual_layer=use_dual_layer,
-                           edge_colormap=edge_colormap,
-                           n_workers=n_workers)
+        add_cell_patches_layer(viewer, verts, faces, track_id_map,
+                               tracks, quant_var,
+                               edge_var=edge_var,
+                               use_dual_layer=use_dual_layer,
+                               edge_colormap=edge_colormap,
+                               n_workers=n_workers)
 
     # Optional points/tracks for context
     if show_points:
@@ -375,7 +419,7 @@ def launch_sphere_viewer(tracks,
                 sphere_df=sphere,
                 tracks=tracks,
                 quant_var=color_var_points or quant_var,
-                size=cell_radius*2,
+                size=cell_radius*2 if not show_patches else cell_radius*0.5,
             )
 
     if show_tracks:
@@ -384,13 +428,25 @@ def launch_sphere_viewer(tracks,
         tracks_data = tracks[["track_id", "t", "z", "y", "x"]].to_numpy()
         viewer.add_tracks(tracks_data, tail_length=10, colormap="turbo", name="tracks")
 
+    # add selectable buttons
+    add_interactive_controls(viewer=viewer,
+                             tracks=tracks,
+                             track_id_map=track_id_map,
+                             verts=verts,
+                             faces=faces,
+                             show_patches=show_patches,
+                             show_points=show_points,
+                             sphere_df=sphere_df,
+                             use_dual_layer=use_dual_layer,
+                             cell_radius=cell_radius)
+
     napari.run()
 # ---------------------------------------------------------------------
 # --- Example synthetic data -----------------------------------------
 # ---------------------------------------------------------------------
 if __name__ == "__main__":
     n = 500
-    n_t = 15
+    n_t = 5
     all_tracks = []
     for ti in range(n_t):
         phi = np.arccos(1 - 2 * np.random.rand(n))
@@ -423,9 +479,10 @@ if __name__ == "__main__":
         sphere=sphere_df,
         quant_var="quant_var",
         edge_var="velocity",
-        use_dual_layer=True,
+        use_dual_layer=False,
+        sphere_subdiv=7,
         show_points=True,
         edge_colormap="magma",
         n_workers=1,
-        cell_radius=12.5 / 500,
+        cell_radius=25 / 500,
     )

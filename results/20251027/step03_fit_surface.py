@@ -17,7 +17,7 @@ if __name__ == '__main__':
     #                                   seg_type="li_segmentation",
     #                                   n_workers=12)
 
-    fit_sh_trend(root=root,
-                 project_name=project_name,
-                 seg_type="li_segmentation",
-                 n_workers=12,)
+    # fit_sh_trend(root=root,
+    #              project_name=project_name,
+    #              seg_type="li_segmentation",
+    #              n_workers=12,)

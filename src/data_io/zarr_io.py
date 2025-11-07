@@ -207,6 +207,7 @@ def open_experiment_array(
     well_num: int | None = None,
     verbose: bool = False,
     mode: str = "r",
+    interp: str | None = None
 ) -> Tuple[zarr.Array | VirtualFuseArray, Path, Optional[str]]:
     """
     Open a project's image array, resolving legacy naming automatically.
@@ -256,7 +257,8 @@ def open_experiment_array(
         if side in side_keys:
             za = root_group[side]
         elif side == "virtual_fused" or side == "fused":
-            interp = "linear" if use_gpu else "nearest"
+            if interp is None:
+                interp = "linear" if use_gpu else "nearest"
             if verbose:
                 print(
                     f"[open_experiment_array] Two-sided experiment detected → "
@@ -274,7 +276,8 @@ def open_experiment_array(
 
     # --- 5️⃣ Detect two-sided structure ---
     if {"side_00", "side_01"}.issubset(side_keys):
-        interp = "linear" if use_gpu else "nearest"
+        if interp is None:
+            interp = "linear" if use_gpu else "nearest"
         if verbose:
             print(
                 f"[open_experiment_array] Two-sided experiment detected → "
