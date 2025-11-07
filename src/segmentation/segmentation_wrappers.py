@@ -13,7 +13,7 @@ from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map
 
 from src.segmentation.mask_builders import perform_li_segmentation
-from src.data_io.zarr_utils import open_experiment_array
+from src.data_io.zarr_io import open_experiment_array
 
 def reset_dataset(store, name, shape, dtype, chunks, overwrite=False):
     if name in store:

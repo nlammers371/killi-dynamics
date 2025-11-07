@@ -1,5 +1,5 @@
 import multiprocessing
-from src.data_io.nd2_export import export_nd2_to_zarr
+from src.export.nd2_export import export_nd2_to_zarr
 
 
 def main():

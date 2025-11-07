@@ -1,4 +1,4 @@
-from src.data_io.czi_export import export_czi_to_zarr
+from src.export.czi_export import export_czi_to_zarr
 import numpy as np
 from multiprocessing import freeze_support
 from src.segmentation.li_thresholding import calculate_li_trend, estimate_li_thresh

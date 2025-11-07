@@ -1,4 +1,4 @@
-from src.data_io.czi_export import export_czi_to_zarr
+from src.export.czi_export import export_czi_to_zarr
 from pathlib import Path
 
 if __name__ == '__main__':

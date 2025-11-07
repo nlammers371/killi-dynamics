@@ -4,7 +4,7 @@ from pathlib import Path
 from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map
 from functools import partial
-from src.data_io.zarr_utils import open_experiment_array, open_mask_array
+from src.data_io.zarr_io import open_experiment_array, open_mask_array
 # ===============================================================
 # 🧩 Worker helper — runs per timepoint
 # ===============================================================
