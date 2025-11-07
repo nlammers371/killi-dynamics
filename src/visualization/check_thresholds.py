@@ -1,12 +1,8 @@
 import napari
 from pathlib import Path
 import numpy as np
-import skimage as ski
-import SimpleITK as sitk
 from skimage.measure import label
-from skimage import morphology, segmentation
-from scipy import ndimage as ndi
-from src.data_io.zarr_utils import open_experiment_array
+from src.data_io.zarr_io import open_experiment_array
 from src.segmentation.li_thresholding import compute_li_threshold_single_frame
 
 data_root = r"Y:\killi_dynamics"

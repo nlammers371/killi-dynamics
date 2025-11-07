@@ -1,4 +1,4 @@
-from src.data_io.czi_export import export_czi_to_zarr_v2
+from src.export.czi_export import export_czi_to_zarr_v2
 import numpy as np
 from multiprocessing import freeze_support
 

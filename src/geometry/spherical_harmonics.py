@@ -54,14 +54,15 @@ def create_sh_mesh(coeffs: np.ndarray, sphere_mesh: tuple[np.ndarray, np.ndarray
     vertices, faces = sphere_mesh
     center = vertices.mean(axis=0)
     vertices_c = vertices - center
-    _, theta, phi = cart2sph(vertices_c)
+    s_arr = cart2sph(vertices_c)
+    r, theta, phi = s_arr[:, 0], s_arr[:, 1], s_arr[:, 2]
 
     L_max = int(np.sqrt(len(coeffs)) - 1)
     basis = build_sh_basis(L_max, phi=phi, theta=theta)
-    r_sh = coeffs[None, :] @ basis
+    r_sh = coeffs[None, :] @ basis.T
     x, y, z = sph2cart(r_sh, theta, phi)
     vertices_sh = np.column_stack([x.T, y.T, z.T]) + center
-    return (vertices_sh, faces), r_sh
+    return vertices_sh, faces, r_sh
 
 
 def fit_sh_healpix(

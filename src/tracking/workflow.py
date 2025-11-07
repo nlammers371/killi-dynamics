@@ -16,7 +16,7 @@ from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map
 from ultrack import load_config, to_tracks_layer, track, tracks_to_zarr
 from zarr.errors import ContainsArrayError
-from src.tracking.track_utils import labels_to_contours_nl
+from src.tracking.tracking_utils import labels_to_contours_nl
 from pathlib import Path
 
 

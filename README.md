@@ -39,7 +39,7 @@ utilities, segmentation and tracking pipelines, and higher-level cell-dynamics a
 ### Typical processing workflow
 1. **Export raw data:** Use the ND2 or CZI exporter to convert microscope files into Zarr. For example:
    ```python
-   from src.data_io.nd2_export import export_nd2_to_zarr
+   from src.export.nd2_export import export_nd2_to_zarr
    export_nd2_to_zarr(root="/data/killi", experiment_date="20240501", overwrite_flag=False, num_workers=4)
    ```
 2. **Register hemispheres (dual-sided lightsheet):** Estimate per-frame shifts and write fusion metadata.
