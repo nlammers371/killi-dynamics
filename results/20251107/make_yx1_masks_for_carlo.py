@@ -5,14 +5,14 @@ from pathlib import Path
 import os
 import pandas as pd
 from skimage.measure import label, regionprops_table
-from scipy.interpolate import interp1d
+from tqdm import tqdm
 
 os.environ["QT_API"] = "pyqt5"
 
 # get filepaths
 root = Path(r"/media/nick/cluster/projects/data/killi_dynamics/")
 project = "20250716"
-vell_num_vec = [4, 11]
+well_num_vec = [4, 11]
 dist_thresh = 50
 t_start = 20
 t_stop = 25
@@ -20,7 +20,7 @@ nucleus_channel = 1
 out_dir = root / 'shared_data' / "sample_yx1_masks" / project
 out_dir.mkdir(parents=True, exist_ok=True)
 
-for well_num in vell_num_vec:
+for well_num in tqdm(well_num_vec, desc="Processing wells"):
 
     im_path = root / "built_data" / "zarr_image_files" / project / (project + f"_well{well_num:04}.zarr")
     mask_path = root / "built_data" / "mask_stacks" / "tdTom-bright-log-v5" / project / (project + f"_well{well_num:04}_mask_aff.zarr")
@@ -63,19 +63,22 @@ for well_num in vell_num_vec:
 
 
     # make output zarr store
-    out_path = out_dir / (project + f"_well{well_num:04}_yx1_mask.zarr")
-    out_store = zarr.open(out_path, mode="w")
+    out_mask_path = out_dir / (project + f"_well{well_num:04}_mask.zarr")
+    out_mask_zarr = zarr.open(out_mask_path, mode="w", shape=mask_clean.shape, dtype=mask_clean.dtype, chunks=(1,) + mask_clean.shape[1:])
+    out_image_path = out_dir / (project + f"_well{well_num:04}_image.zarr")
+    out_image_zarr = zarr.open(out_image_path, mode="w", shape=im_p.shape, dtype=im_p.dtype, chunks=(1,) + im_p.shape[1:])
+    # transfer metadata
+    for key in mask_zarr.attrs:
+        out_image_zarr.attrs[key] = mask_zarr.attrs[key]
+    for key in image_zarr.attrs:
+        out_image_zarr.attrs[key] = image_zarr.attrs[key]
+
+    # write data
+    out_mask_zarr[:] = mask_clean
+    out_image_zarr[:] = im_p
 
 
 
-
-viewer = napari.Viewer()
-# viewer.add_image(data_full1, scale=scale_vec, colormap="gray", contrast_limits=[0, 2500])
-
-viewer.add_image(im_p, scale=scale_vec,  colormap="gray") #, contrast_limits=[0, 2500])
-viewer.add_labels(mask_p, scale=scale_vec)
-viewer.add_labels(mask_clean, scale=scale_vec)
-napari.run()
 
 print("Check")
 
