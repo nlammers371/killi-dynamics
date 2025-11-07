@@ -13,12 +13,13 @@ def infer_optical_flow( root: Path,
                                                             side="virtual_fused",
                                                             verbose=True,
                                                             use_gpu=True,
-                                                            interp="linear")
+                                                            interp="nearest")
 
     out_path = root / "optical_flow" / f"{project}_optical_flow.zarr"
     test = vf[:2]
     # compute optical flow
-    flow = timelapse_flow(test, store_or_path=out_path, lr=1e-2, num_iterations=2_000)
+    print("Computing optical flow...")
+    flow = timelapse_flow(test, channel_axis=1, store_or_path=out_path, lr=1e-2, num_iterations=1_000)
 
     return flow
 

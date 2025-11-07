@@ -268,6 +268,7 @@ def fit_surf_sphere_trend(
                              root=root,
                              project_name=project_name,
                              seg_type=seg_type,
+                             side_key="fused",
                              rad_quantile=rad_quantile,)
     if par_flag:
         records = process_map(run_sphere_fit, range(n_t), max_workers=n_workers, chunksize=1,

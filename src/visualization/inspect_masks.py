@@ -3,112 +3,92 @@ import zarr
 import napari
 import numpy as np
 from pathlib import Path
-import os
-from src.data_io.zarr_io import open_experiment_array, open_mask_array
-from src.geometry.spherical_harmonics import create_sh_mesh
-import trimesh 
+from skimage.measure import regionprops
+from matplotlib import cm
 import json
+import trimesh
+from tqdm import tqdm
 
-os.environ["QT_API"] = "pyqt5"
-
-# get filepaths
+# ----------------------------
+# CONFIG
+# ----------------------------
 root = Path(r"Y:\killi_dynamics")
 project = "20251019_BC1-NLS_52-80hpf"
 seg_type = "li_segmentation"
 
-t_start = 960
-t_stop = 965
-nucleus_channel = 1
+t_start, t_stop = 960, 962
+scale_vec = np.array([3.0, 0.85, 0.85])  # (Z,Y,X) µm/px
 
-# load surf sphere
+# ----------------------------
+# LOAD SPHERE GEOMETRY
+# ----------------------------
 sphere_path = root / "surf_stats" / f"{project}_surf_stats.zarr" / "surf_fits" / "sphere_fits.csv"
 sphere_df = pd.read_csv(sphere_path)
 
-frames = np.arange(t_start, t_stop)
 sphere_time_filter = (sphere_df["t"] >= t_start) & (sphere_df["t"] < t_stop)
-avg_sphere_center = np.mean(sphere_df.loc[sphere_time_filter,  ["center_x_smooth", "center_y_smooth", "center_z_smooth"]].values, axis=0)
-avf_sphere_radius = np.mean(sphere_df.loc[sphere_time_filter, "radius_smooth"].values)
-mesh = trimesh.creation.icosphere(subdivisions=5, radius=avf_sphere_radius)
-faces = mesh.faces
-verts = mesh.vertices + avg_sphere_center
-mesh.vertices = verts
+avg_center = np.mean(
+    sphere_df.loc[sphere_time_filter, ["center_x_smooth", "center_y_smooth", "center_z_smooth"]].values,
+    axis=0,
+)
+avg_radius = np.mean(sphere_df.loc[sphere_time_filter, "radius_smooth"].values)
 
-# load SH fit
-sh_path = root / "surf_stats" / f"{project}_surf_stats.zarr" / "surf_fits" / "surf_sh_coeffs.json"
-with open(sh_path, "r") as f:
-    sh_coeffs = json.load(f)
-
-coeffs = np.array(sh_coeffs["960"])
-vertices_sh, faces_sh, r_sh = create_sh_mesh(coeffs, sphere_mesh=(verts, faces))
-
-
-# mpath = root / "built_data" / "mask_stacks" / (project + "_mask_fused.zarr")
-mpath = root / "segmentation" / seg_type / (project + "_masks.zarr")
-m_store = zarr.open(mpath, mode="r")
-mask_clean = m_store["fused"]["clean_pre"]
-
-# mask_raw, _, _ = open_mask_array(root, project, side="virtual_fused",
-#                                  seg_type=seg_type, mask_field="stitched",
-#                                  use_gpu=True,
-#                                  verbose=False)
-# mask_clean = m_store["fused"]["clean"]
-
-# im, _store_path, _resolved_side = open_experiment_array(root, project)
-# zarr2 = zarr.open(zpath2, mode="r")
-
-# get scale info
-scale_vec = tuple([3.0, 0.85, 0.85])
-
-# extract relevant frames
-# im_p = np.squeeze(im[t_start:t_stop, nucleus_channel])
+# ----------------------------
+# LOAD MASK STACK
+# ----------------------------
+mpath = root / "segmentation" / seg_type / f"{project}_masks.zarr"
+mask_clean = zarr.open(mpath, mode="r")["fused"]["clean"]
 mask_p = mask_clean[t_start:t_stop]
-# mask_r_p = mask_raw[t_start:t_stop]
 
+# ----------------------------
+# COMPUTE DISTANCES + BUILD COLORED VOLUME
+# ----------------------------
+timepoints = np.arange(t_start, t_stop)
+colored_stack = np.zeros_like(mask_p, dtype=np.float32)
+distance_records = []
 
-viewer = napari.Viewer()
+for i, t in enumerate(tqdm(timepoints, desc="Computing distances")):
+    mask_t = mask_p[i]
+    if np.max(mask_t) == 0:
+        continue
 
-viewer.add_surface(
-        (verts, faces),
-        name="embryo surface",
-        colormap=None,
-        opacity=0.95,
-        shading="flat",
-    )
+    # get frame-specific sphere fit
+    row = sphere_df.loc[sphere_df["t"] == t]
+    if not row.empty:
+        center = row[["center_z", "center_y", "center_x"]].values[0]
+        radius = row["radius"].values[0]
+    else:
+        center, radius = avg_center, avg_radius
 
-# viewer.add_surface(
-#         (vertices_sh, faces_sh, r_sh),
-#         name="embryo surface",
-#         colormap=None,
-#         opacity=0.95,
-#         shading="flat",
-#     )
-# viewer.add_image(data_full1, scale=scale_vec, colormap="gray", contrast_limits=[0, 2500])
+    # compute distances and paint efficiently
+    props = regionprops(mask_t, spacing=scale_vec)
+    for prop in props:
+        coords = prop.coords
+        centroid = np.array(prop.centroid)
+        dist = np.linalg.norm(centroid - center ) - radius
+        colored_stack[i, coords[:, 0], coords[:, 1], coords[:, 2]] = dist
+        distance_records.append((t, prop.label, *centroid, dist))
 
-# viewer.add_image(im_p, scale=scale_vec,  colormap="gray", contrast_limits=[0, 2500])
-viewer.add_labels(mask_p, scale=scale_vec)
-# viewer.add_labels(mask_r_p > 0, scale=scale_vec)
+distance_df = pd.DataFrame(
+    distance_records,
+    columns=["t", "label", "z_um", "y_um", "x_um", "dist_to_surface_um"],
+)
 
+print(f"Computed distances for {len(distance_df)} nuclei across {len(timepoints)} frames.")
+
+# ----------------------------
+# NORMALIZE + COLORIZE
+# ----------------------------
+# nonzero = colored_stack[colored_stack != 0]
+# vmin, vmax = np.percentile(nonzero, [0.01, 99.9]) if nonzero.size > 0 else (0, 1)
+# colored_norm = np.clip((colored_stack - vmin) / (vmax - vmin), 0, 1)
+# cmap = cm.get_cmap("coolwarm")
+# colored_rgb = (cmap(colored_norm)[..., :3] * 255).astype(np.uint8)
+
+# ----------------------------
+# DISPLAY
+# ----------------------------
+viewer = napari.Viewer(ndisplay=3)
+viewer.add_image(colored_stack, name="distance to sphere", scale=scale_vec)
+viewer.add_labels(mask_p, name="masks", scale=scale_vec, opacity=0.15)
 napari.run()
-print("wtf")
-
-#
-# # generate frame indices
-# t_range = np.arange(500, 510)
-#
-#
-# # get scale info
-# scale_vec = tuple([mask_full.attrs['PhysicalSizeZ'], mask_full.attrs['PhysicalSizeY'], mask_full.attrs['PhysicalSizeX']])
-#
-# print("Loading zarr files...")
-# # extract relevant frames
-# # im = np.squeeze(im_full[t_range, nucleus_channel])
-# mask = np.squeeze(mask_full[t_range])
-#
-# viewer = napari.Viewer()
-#
-# viewer.add_labels(mask, scale=scale_vec)
-#
-# napari.run()
-
-print("Check")
-
+print("why?")

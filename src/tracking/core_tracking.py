@@ -128,14 +128,13 @@ def perform_tracking(
 
     # --- segmentation and boundary extraction ---
     if segment_indices.size > 0:
-        detection_da, boundaries_da = labels_to_contours_nl(
+        _, _ = labels_to_contours_nl(
             mask_da,
             segment_indices,
-            par_flag=par_seg_flag,
-        )
-        for t, frame in enumerate(segment_indices):
-            detection[frame] = detection_da[t]
-            boundaries[frame] = boundaries_da[t]
+            foreground_store_or_path=detection.store,  # or str(seg_path / "detection")
+            contours_store_or_path=boundaries.store,  # or str(seg_path / "boundaries")
+            par_flag=par_seg_flag, )
+
 
     # --- tracking ---
     detection_da = da.from_zarr(detection)[start_i:stop_i]
