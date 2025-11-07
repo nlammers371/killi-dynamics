@@ -112,7 +112,7 @@ def extract_foreground_intensities(
         fg_root.attrs.update({
             "description": "Sparse per-frame foreground voxel coordinates and intensities",
             "n_channels": n_channels,
-            "voxel_size_um": scale_vec.tolist(),
+            "voxel_size_um": list(scale_vec),
         })
         written_t = set()
     else:
@@ -130,7 +130,7 @@ def extract_foreground_intensities(
             fg_root.attrs.update({
                 "description": "Sparse per-frame foreground voxel coordinates and intensities",
                 "n_channels": n_channels,
-                "voxel_size_um": scale_vec.tolist(),
+                "voxel_size_um": list(scale_vec),
             })
             written_t = set()
         else:

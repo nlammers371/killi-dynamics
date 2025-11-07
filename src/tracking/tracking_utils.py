@@ -12,81 +12,65 @@ from tqdm.contrib.concurrent import process_map
 from scipy import ndimage as ndi
 import skimage.segmentation as segm
 
+from pathlib import Path
+import numpy as np
+import multiprocessing
+from functools import partial
+from tqdm import tqdm
+from tqdm.contrib.concurrent import process_map
+import zarr
+from typing import Union, Sequence, Optional, Tuple
+from numpy.typing import ArrayLike
+
+
 def labels_to_contours_nl(
-    labels: Union[ArrayLike, Sequence[ArrayLike]],
+    labels: ArrayLike,
     write_indices: Sequence[int],
     sigma: Optional[Union[Sequence[float], float]] = None,
-    foreground_store_or_path: Union[Store, str, None] = None,
-    contours_store_or_path: Union[Store, str, None] = None,
-    overwrite: bool = False,
+    foreground_store_or_path: Union[zarr.storage.Store, str, None] = None,
+    contours_store_or_path: Union[zarr.storage.Store, str, None] = None,
     n_workers: Optional[int] = None,
     par_flag: bool = True,
 ) -> Tuple[ArrayLike, ArrayLike]:
     """
-    Converts and merges a sequence of labels into ultrack input format (foreground and contours)
-
-    Parameters
-    ----------
-    labels : Union[ArrayLike, Sequence[ArrayLike]]
-        List of labels with equal shape.
-    sigma : Optional[Union[Sequence[float], float]], optional
-        Contours smoothing parameter (gaussian blur), contours aren't smoothed when not provided.
-    foreground_store_or_path : str, zarr.storage.Store, optional
-        Zarr storage, it can be used with zarr.NestedDirectoryStorage to save the output into disk.
-        By default it loads the data into memory.
-    contours_store_or_path : str, zarr.storage.Store, optional
-        Zarr storage, it can be used with zarr.NestedDirectoryStorage to save the output into disk.
-        By default it loads the data into memory.
-    overwrite : bool, optional
-        Overwrite output output files if they already exist, by default False.
-
-    Returns
-    -------
-    Tuple[ArrayLike, ArrayLike]
-        Combined foreground and edges arrays.
+    Converts a sequence of label images into ultrack input format (foreground + contours).
+    Each parallel worker writes its slice directly into the given Zarr datasets.
     """
-    # ndi = import_module("scipy", "ndimage")
-    # segm = import_module("skimage", "segmentation")
-
-    # if not isinstance(labels, Sequence):
-    #     labels = [labels]
     if isinstance(labels, Sequence):
-        raise ValueError("Function is not yet compatible with multiple lablels per image")
+        raise ValueError("Function is not yet compatible with multiple label stacks per call.")
 
     if n_workers is None:
         total_cpus = multiprocessing.cpu_count()
-        # Limit yourself to 33% of CPUs (rounded down, at least 1)
         n_workers = max(1, total_cpus // 3)
 
+    # --- open existing datasets (no shape/dtype declared) ---
+    if foreground_store_or_path is None or contours_store_or_path is None:
+        raise ValueError("Must provide valid foreground and contours Zarr destinations.")
 
-    shape = (len(write_indices),) + labels.shape[1:]
+    foreground = zarr.open(foreground_store_or_path, mode="a")
+    contours = zarr.open(contours_store_or_path, mode="a")
 
+    shape = foreground.shape  # for reference if needed downstream
 
-    foreground = create_zarr(
+    # --- per-frame function ---
+    run_frame = partial(
+        label_fun,
+        write_indices=write_indices,
+        labels=labels,
+        foreground=foreground,
+        contours=contours,
         shape=shape,
-        dtype=bool,
-        store_or_path=foreground_store_or_path,
-        overwrite=overwrite,
-        default_store_type=zarr.TempStore,
-    )
-    contours = create_zarr(
-        shape=shape,
-        dtype=np.float32,
-        store_or_path=contours_store_or_path,
-        overwrite=overwrite,
-        default_store_type=zarr.TempStore,
+        sigma=sigma,
     )
 
-    label_fun_run = partial(label_fun, write_indices=write_indices, labels=labels, foreground=foreground,
-                            contours=contours, shape=shape, sigma=sigma)
-
+    # --- run computation ---
     if par_flag:
-        print("Using parallel processing")
-        process_map(label_fun_run, write_indices, max_workers=n_workers, chunksize=1)
+        print(f"Using {n_workers} workers for segmentation + direct writes")
+        process_map(run_frame, write_indices, max_workers=n_workers, chunksize=1)
     else:
         print("Using sequential processing")
-        for t in tqdm(write_indices):
-            label_fun_run(t)
+        for t in tqdm(write_indices, desc="Segmenting + writing"):
+            run_frame(t)
 
     return foreground, contours
 
