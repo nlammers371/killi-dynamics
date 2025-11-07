@@ -164,7 +164,7 @@ def extract_foreground_intensities(
                     chunksize=1,
                     desc="Extracting foreground intensities...")
     else:
-        for t in tqdm(tp_write, desc="Extracting foreground intensities..."):
+        for t in tqdm(to_write, desc="Extracting foreground intensities..."):
             call_extract_foreground(t)
 
     print(f"[extract_foreground_intensities] Done — stored under {mask_store_path}/{side_spec}/{fg_group_name}")

@@ -17,4 +17,4 @@ if __name__ == "__main__":
     project_name = "20251019_BC1-NLS_52-80hpf"
     root = Path("/media/nick/hdd011/killi_dynamics/")
     # call function
-    extract_foreground_intensities(root, project_name, n_workers=8, overwrite=False)
+    extract_foreground_intensities(root, project_name, n_workers=4, overwrite=False)
