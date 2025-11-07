@@ -29,23 +29,13 @@ if __name__ == '__main__':
     #                 thresh_factors=None,
     #             )
 
-    # mask_qc_wrapper(root=data_root,
-    #                 project=project_name,
-    #                 mask_type="li_segmentation",
-    #                 n_workers=12,
-    #                 overwrite=True)
+    mask_qc_wrapper(root=root,
+                    project=project_name,
+                    mask_type="li_segmentation",
+                    n_workers=16,
+                    overwrite00=False,
+                    overwrite01=True,
+                    skip_surf_filtering=False)
 
     # fuse masks
-    store_path = root / "segmentation" / "li_segmentation" / f"{project_name}_masks.zarr"
-    vf = VirtualFuseArray(
-        store_path=store_path,
-        is_mask=True,
-        subgroup_key="clean",
-        use_gpu=False,
-    )
-
-    vf.write_fused(
-        subgroup="clean",  # writes to fused/clean
-        overwrite=True,
-        n_workers=12
-    )
+    # store_path = root / "segmentation" / "li_segmentation" / f"{project_name}_masks.zarr"

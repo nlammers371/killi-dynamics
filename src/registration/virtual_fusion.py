@@ -48,7 +48,7 @@ def _fuse_single_frame(args):
         fused_t = fused_t.get()
     fused_t = fused_t.astype(dtype, copy=False)
 
-    zarr.open_group(store_path, mode="a")["fused"]["clean"][t] = fused_t
+    zarr.open_group(store_path, mode="a")["fused"][subgroup_key][t] = fused_t
     return t
 
 class VirtualFuseArray:
@@ -115,8 +115,6 @@ class VirtualFuseArray:
             self.interp = "nearest"
         self.use_gpu = bool(use_gpu and _HAS_GPU)
         self.xp = _DEFAULT_XP if self.use_gpu else np
-
-
 
         # Basic checks
         if self.ref.shape[0] != self.mov.shape[0]:
@@ -264,7 +262,7 @@ class VirtualFuseArray:
 
 
 
-    def write_fused(self, subgroup="clean", overwrite=False, n_workers=1):
+    def write_fused(self, subgroup=None, overwrite=False, n_workers=1):
         dtype = np.uint16 if self.is_mask else np.float32
         root = zarr.open_group(self.store_path, mode="a")
         fused_group = root.require_group("fused")
@@ -272,7 +270,12 @@ class VirtualFuseArray:
             subgroup, shape=self.shape, chunks=(1, 1, 1, self.shape[-2], self.shape[-1]), dtype=dtype,
             overwrite=overwrite
         )
+        # write attributes from self
+        for k, v in self.attrs.items():
+            fused_z.attrs[k] = v
 
+        if subgroup is None:
+            subgroup = "clean" if self.is_mask else "data"
         print(f"[VirtualFuseArray] Writing fused dataset → /fused/{subgroup} (parallel={n_workers > 1})")
 
         if n_workers > 1:
