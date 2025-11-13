@@ -16,7 +16,7 @@ root = Path(r"Y:\killi_dynamics")
 project = "20251019_BC1-NLS_52-80hpf"
 seg_type = "li_segmentation"
 
-t_start, t_stop = 960, 962
+t_start, t_stop = 850, 925
 scale_vec = np.array([3.0, 0.85, 0.85])  # (Z,Y,X) µm/px
 
 # ----------------------------
@@ -42,38 +42,38 @@ mask_p = mask_clean[t_start:t_stop]
 # ----------------------------
 # COMPUTE DISTANCES + BUILD COLORED VOLUME
 # ----------------------------
-timepoints = np.arange(t_start, t_stop)
-colored_stack = np.zeros_like(mask_p, dtype=np.float32)
-distance_records = []
-
-for i, t in enumerate(tqdm(timepoints, desc="Computing distances")):
-    mask_t = mask_p[i]
-    if np.max(mask_t) == 0:
-        continue
-
-    # get frame-specific sphere fit
-    row = sphere_df.loc[sphere_df["t"] == t]
-    if not row.empty:
-        center = row[["center_z", "center_y", "center_x"]].values[0]
-        radius = row["radius"].values[0]
-    else:
-        center, radius = avg_center, avg_radius
-
-    # compute distances and paint efficiently
-    props = regionprops(mask_t, spacing=scale_vec)
-    for prop in props:
-        coords = prop.coords
-        centroid = np.array(prop.centroid)
-        dist = np.linalg.norm(centroid - center ) - radius
-        colored_stack[i, coords[:, 0], coords[:, 1], coords[:, 2]] = dist
-        distance_records.append((t, prop.label, *centroid, dist))
-
-distance_df = pd.DataFrame(
-    distance_records,
-    columns=["t", "label", "z_um", "y_um", "x_um", "dist_to_surface_um"],
-)
-
-print(f"Computed distances for {len(distance_df)} nuclei across {len(timepoints)} frames.")
+# timepoints = np.arange(t_start, t_stop)
+# colored_stack = np.zeros_like(mask_p, dtype=np.float32)
+# distance_records = []
+#
+# for i, t in enumerate(tqdm(timepoints, desc="Computing distances")):
+#     mask_t = mask_p[i]
+#     if np.max(mask_t) == 0:
+#         continue
+#
+#     # get frame-specific sphere fit
+#     row = sphere_df.loc[sphere_df["t"] == t]
+#     if not row.empty:
+#         center = row[["center_z", "center_y", "center_x"]].values[0]
+#         radius = row["radius"].values[0]
+#     else:
+#         center, radius = avg_center, avg_radius
+#
+#     # compute distances and paint efficiently
+#     props = regionprops(mask_t, spacing=scale_vec)
+#     for prop in props:
+#         coords = prop.coords
+#         centroid = np.array(prop.centroid)
+#         dist = np.linalg.norm(centroid - center ) - radius
+#         colored_stack[i, coords[:, 0], coords[:, 1], coords[:, 2]] = dist
+#         distance_records.append((t, prop.label, *centroid, dist))
+#
+# distance_df = pd.DataFrame(
+#     distance_records,
+#     columns=["t", "label", "z_um", "y_um", "x_um", "dist_to_surface_um"],
+# )
+#
+# print(f"Computed distances for {len(distance_df)} nuclei across {len(timepoints)} frames.")
 
 # ----------------------------
 # NORMALIZE + COLORIZE
@@ -88,7 +88,6 @@ print(f"Computed distances for {len(distance_df)} nuclei across {len(timepoints)
 # DISPLAY
 # ----------------------------
 viewer = napari.Viewer(ndisplay=3)
-viewer.add_image(colored_stack, name="distance to sphere", scale=scale_vec)
-viewer.add_labels(mask_p, name="masks", scale=scale_vec, opacity=0.15)
+viewer.add_labels(mask_p, name="masks", scale=scale_vec, opacity=0.9)
 napari.run()
 print("why?")
