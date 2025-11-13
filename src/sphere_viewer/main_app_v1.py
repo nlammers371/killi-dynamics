@@ -707,7 +707,7 @@ if __name__ == "__main__":
         show_points=True,
         show_tracks=True,
         show_patches=False,
-        frame_range=(0, 935),
+        frame_range=(935, 1598),
         cell_radius=12.5,
         n_workers=12,
     )

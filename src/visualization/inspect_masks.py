@@ -16,7 +16,7 @@ root = Path(r"Y:\killi_dynamics")
 project = "20251019_BC1-NLS_52-80hpf"
 seg_type = "li_segmentation"
 
-t_start, t_stop = 850, 925
+t_start, t_stop = 950, 1100
 scale_vec = np.array([3.0, 0.85, 0.85])  # (Z,Y,X) µm/px
 
 # ----------------------------
@@ -88,6 +88,6 @@ mask_p = mask_clean[t_start:t_stop]
 # DISPLAY
 # ----------------------------
 viewer = napari.Viewer(ndisplay=3)
-viewer.add_labels(mask_p, name="masks", scale=scale_vec, opacity=0.9)
+viewer.add_labels(mask_p>0, name="masks", scale=scale_vec, opacity=0.9)
 napari.run()
 print("why?")
