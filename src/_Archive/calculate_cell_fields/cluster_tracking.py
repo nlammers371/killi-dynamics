@@ -125,14 +125,14 @@ def _cluster_stats_for_time(t_val, df_t, comps, u, r, d_thresh,
 def find_clusters_per_timepoint(
     tracks_df: pd.DataFrame,
     sphere_df: pd.DataFrame,
-    d_thresh: float,
-    min_size: int = 5,
+    d_thresh: float = 30,
+    min_size: int = 10,
     time_col: str = "t",
     xcol: str = "x", ycol: str = "y", zcol: str = "z",
     fluo_col: str = "mean_fluo",
     sphere_time_col: str = "t",
-    sphere_center_cols=("xc","yc","zc"),
-    sphere_radius_col="r"
+    sphere_center_cols=("center_x_smoothed", "center_x_smoothed", "center_x_smoothed"),
+    sphere_radius_col="r_smoothed"
 ) -> Dict[Any, List[dict]]:
     sph = sphere_df.set_index(sphere_time_col)[list(sphere_center_cols)+[sphere_radius_col]]
     clusters_by_t: Dict[Any, List[dict]] = {}
