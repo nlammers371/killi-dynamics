@@ -2,7 +2,7 @@ from pathlib import Path
 import numpy as np
 import dask.array as da
 import zarr
-from ultrack import load_config, track, to_tracks_layer, tracks_to_zarr
+from ultrack import load_config, track, to_tracks_layer, tracks_to_zarr, add_flow
 import shutil
 import warnings
 
@@ -19,6 +19,7 @@ def perform_tracking(
     seg_type: str,
     overwrite_tracking: bool = False,
     overwrite_segmentation: bool = False,
+    use_optical_flow: bool = False,
     well_num: int | None = None,
     start_i: int = 0,
     stop_i: int | None = None,
@@ -59,8 +60,18 @@ def perform_tracking(
     if well_num is not None:
         project_path = project_path / f"well{well_num:04}"
 
-    project_sub_path = project_path / f"track_{start_i:04}_{stop_i:04}{suffix}"
+    flow_suffix = "_withflow" if use_optical_flow else ""
+
+    project_sub_path = project_path / (f"track_{start_i:04}_{stop_i:04}{suffix}" + flow_suffix)
     project_sub_path.mkdir(parents=True, exist_ok=True)
+
+    if use_optical_flow:
+        flow_path = root / "optical_flow" / f"{project_name}_optical_flow.zarr"
+        if not flow_path.exists():
+            raise FileNotFoundError(f"User requested flow-assisted tracking but optical flow data not found at {flow_path}")
+        flow = zarr.open(flow_path, mode="r")
+    else:
+        flow = None
 
     if "voxel_size_um" in mask_zarr.attrs:
         scale_vec: list[float] = mask_zarr.attrs["voxel_size_um"]
@@ -82,6 +93,7 @@ def perform_tracking(
     metadata_path = root / "metadata" / "tracking"
     cfg = load_config(metadata_path / f"{tracking_config}.txt")
     cfg.data_config.working_dir = str(project_sub_path)
+
 
     # copy the file
     src = root / "metadata" / "tracking" / f"{tracking_config}.txt"
@@ -141,7 +153,7 @@ def perform_tracking(
     boundaries_da = da.from_zarr(boundaries)[start_i:stop_i]
 
     print("Performing tracking...")
-    track(cfg, detection=detection_da, edges=boundaries_da, scale=scale_vec)
+    track(cfg, detection=detection_da, edges=boundaries_da, scale=scale_vec, vector_field=flow)
 
     # --- save results ---
     print("Saving results...")

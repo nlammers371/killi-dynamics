@@ -532,13 +532,13 @@ def launch_sphere_viewer(
     # ---- BACKDROP SPHERE ----
     add_backdrop_sphere(
         viewer,
-        radius=mean_radius * 0.95,  # slightly larger than fin mesh
+        radius=mean_radius * 0.85,  # slightly larger than fin mesh
         center=mean_center,
         nside=max(32, nside // 2),  # coarser mesh is fine for background
     )
 
 
-    verts = 0.99 * base_verts * mean_radius + mean_center
+    verts = base_verts * mean_radius + mean_center
     center_drift_array = mean_center - sphere[["cx", "cy", "cz"]].to_numpy()
     sphere[["d_cx", "d_cy", "d_cz"]] = center_drift_array
 
@@ -633,6 +633,7 @@ def launch_sv_wrapper(
     root: Path,
     project_name: str,
     tracking_config: str,
+    used_flow: bool = True,
     nside: int = 128,
     patch_var: str = "track_id",
     point_var: str = "mean_fluo",
@@ -650,6 +651,8 @@ def launch_sv_wrapper(
         rescale_tracks=True,
         project_name=project_name,
         tracking_config=tracking_config,
+        prefer_smoothed=True,
+        prefer_flow=used_flow,
     )
 
     candidate_cols = [
@@ -704,7 +707,7 @@ if __name__ == "__main__":
         show_points=True,
         show_tracks=True,
         show_patches=False,
-        frame_range=(900, 975),
+        frame_range=(0, 935),
         cell_radius=12.5,
         n_workers=12,
     )
