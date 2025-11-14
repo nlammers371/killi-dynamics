@@ -90,7 +90,7 @@ else:
     suffix = ""
 
 root = r"E:\Nick\killi_tracker"
-project_name = "20241126_LCP1-NLSMSC"
+project_name = "20241126_LCP1-NLSMSC_v0"
 image_path = os.path.join(root, "built_data", "zarr_image_files",  project_name + suffix + ".zarr")
 track_name = "tracking_lcp_nuclei"
 tracks_csv = os.path.join(root, "tracking", project_name, track_name, "track_0000_0719", "tracks_dist.csv")

@@ -8,7 +8,7 @@ from skimage.measure import regionprops
 import napari
 import dask.array as da
 import pandas as pd
-from src.build_killi.build_utils import labels_to_contours_nl
+from src.nucleus_dynamics.tracking.tracking_utils import labels_to_contours_nl
 from tqdm import tqdm
 from scipy.optimize import linear_sum_assignment
 from functools import partial
@@ -193,17 +193,13 @@ def combine_tracking_results(root, project_name, tracking_config, track_range1, 
     return {}
 
 # create function to load and visualize tracking results using napari
-def check_tracking(root, project_name, tracking_config, seg_model="", suffix="", well_num=None, start_i=0, stop_i=None,
+def check_tracking(root, project_name, tracking_config, seg_model="", suffix="", start_i=0, stop_i=None,
                    use_marker_masks=False, use_stack_flag=False, use_fused=True, view_range=None, tracks_only=False):
 
     # get path to zarr file
-    if well_num is not None:
-        file_prefix = project_name + f"_well{well_num:04}"
-        subfolder = project_name
-    else:
-        file_prefix = project_name
-        subfolder = ""
-        well_num = 0
+    file_prefix = project_name
+    subfolder = ""
+    well_num = 0
 
     # get name
     tracking_name = tracking_config.replace(".txt", "")
@@ -285,19 +281,14 @@ def check_tracking(root, project_name, tracking_config, seg_model="", suffix="",
     return viewer
 
 
-def perform_tracking(root, project_name, tracking_config, seg_model, well_num=None, start_i=0, stop_i=None,
+def perform_tracking(root, project_name, tracking_config, seg_model, start_i=0, stop_i=None,
                      use_stack_flag=False, use_marker_masks=False, use_fused=True, suffix="", par_seg_flag=True, last_filter_start_i=None):
 
     tracking_name = tracking_config.replace(".txt", "")
 
     # get path to zarr file
-    if well_num is not None:
-        file_prefix = project_name + f"_well{well_num:04}"
-        subfolder = project_name
-    else:
-        file_prefix = project_name
-        subfolder = ""
-        well_num = 0
+    file_prefix = project_name
+    subfolder = ""
 
     # set parameters
     # data_zarr = os.path.join(root, "built_data", "zarr_image_files", project_name, file_prefix + ".zarr")
@@ -327,8 +318,8 @@ def perform_tracking(root, project_name, tracking_config, seg_model, well_num=No
     if use_marker_masks:
         project_name += "_marker"
 
-    seg_path = os.path.join(root, "tracking", project_name, "segmentation", f"well{well_num:04}", "")
-    project_path = os.path.join(root, "tracking", project_name, tracking_name, f"well{well_num:04}", "")
+    seg_path = os.path.join(root, "tracking", project_name, "segmentation", "")
+    project_path = os.path.join(root, "tracking", project_name, tracking_name, "")
     project_sub_path = os.path.join(project_path, f"track_{start_i:04}" + f"_{stop_i:04}" + suffix, "")
     os.makedirs(project_sub_path, exist_ok=True)
     full_shape = mask_tzyx.shape

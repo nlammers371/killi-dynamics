@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 from src.nucleus_dynamics.utilities.image_utils import calculate_LoG
 
-# zarr_path = Path("E:/Nick/Cole Trapnell's Lab Dropbox/Nick Lammers/Nick/killi_tracker/built_data/zarr_image_files/20241126_LCP1-NLSMSC.zarr")
+# zarr_path = Path("E:/Nick/Cole Trapnell's Lab Dropbox/Nick Lammers/Nick/killi_tracker/built_data/zarr_image_files/20241126_LCP1-NLSMSC_v0.zarr")
 date = "20250716"
 zarr_path = Path(f"/media/nick/cluster/projects/data/killi_tracker/built_data/zarr_image_files/{date}/")
 image_list = sorted(list(zarr_path.glob("*.zarr")))

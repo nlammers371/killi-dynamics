@@ -18,11 +18,11 @@ base = AVAILABLE_COLORMAPS["bop orange"]
 rgba = np.array(base.colors)
 rgba[0, -1] = 0
 bop_orange = Colormap(rgba, name="bop_orange")
-
+W, H = 1920, 1920
 # --- NEW: smoothing + color params ---
 N = 40
 stride = 2      # save every N frames
-scale_factor = 2  # multiplier for resolution
+scale_factor = 1  # multiplier for resolution
 text_color = "white"
 lcp_color = bop_orange
 folder_path = Path(r"D:\Syd\MoviesForCustomLUT_Nick")
@@ -41,6 +41,8 @@ OUTROOT= Path(r"E:\Nick\killi_immuno_paper\figures\movies")
 
 
 for folder_i, folder in enumerate(tqdm(data_folders, desc="Processing folders...", position=0)):
+    if folder_i < 2:
+        continue
     OUTDIR = OUTROOT / folder
     OUTDIR.mkdir(parents=True, exist_ok=True)
 
@@ -105,7 +107,7 @@ for folder_i, folder in enumerate(tqdm(data_folders, desc="Processing folders...
 
         viewer.dims.set_current_step(0, int(N))  # axis 0 is time
 
-        viewer.window.qt_viewer.canvas.native.setFixedSize(800, 800)
+        viewer.window.qt_viewer.canvas.native.setFixedSize(H, W)
         viewer.scale_bar.visible = True
         viewer.scale_bar.unit = "um"
         viewer.scale_bar.color = text_color

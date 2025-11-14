@@ -319,7 +319,6 @@ def main(root: Union[str, Path],
          project_name: str,
          tracking_config: str = "tracking_20250328_redux",
          tracking_instance: str = "",
-         well_num: int = 0,
          mip_flag: bool = True):
     set_qt_env()
 
@@ -345,11 +344,10 @@ def main(root: Union[str, Path],
     print(f"Loading tracking data for project: {project_name}")
     track_dfs: Dict[str, Optional[pd.DataFrame]] = {}
 
-    track_path = root / "tracking" / project_name / tracking_config / f"well{well_num:04}" / tracking_instance
+    track_path = root / "tracking" / project_name / tracking_config / tracking_instance
     tracks_csv = track_path / "tracks_fluo_stitched.csv"
     if not tracks_csv.exists():
-        pass
-        # tracks_csv = track_path / "tracks_stitched.csv"
+        tracks_csv = track_path / "tracks_stitched.csv"
     if not tracks_csv.exists():
         tracks_csv = track_path / "tracks_fluo.csv"
     if not tracks_csv.exists():
@@ -357,6 +355,8 @@ def main(root: Union[str, Path],
 
 
     tracks_df = load_tracks_df(tracks_csv, div_z=div_z, mip_flag=mip_flag)
+    if "track_mostly_stationary" in tracks_df.columns:
+        tracks_df = tracks_df[tracks_df["track_mostly_stationary"] == False].copy()
     if tracks_df is not None:
         track_dfs["nls tracks"] = tracks_df
 
@@ -745,8 +745,8 @@ def main(root: Union[str, Path],
 # ------------------------------ Entrypoint ------------------------------
 
 if __name__ == "__main__":
-    root = r"E:\Nick\Cole Trapnell's Lab Dropbox\Nick Lammers\Nick\killi_tracker"
+    root = r"E:\Nick\killi_immuno_paper"
     project_name = "20241126_LCP1-NLSMSC" #"20250311_LCP1-NLSMSC" #"20250419_BC1-NLSMSC"  #"20250311_LCP1-NLSMSC" # #
-    config = "tracking_lcp"
+    config = "tracking_lcp_nuclei"
     mip_flag = True
     main(root=root, project_name=project_name, tracking_config=config, mip_flag=mip_flag)
