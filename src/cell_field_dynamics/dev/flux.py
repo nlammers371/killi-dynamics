@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 
 from .grids import healpix_nside2npix
-from .vector_field import VectorFieldResult
+from src.cell_field_dynamics.vector_field import VectorFieldResult
 
 
 def compute_flux_from_vector_field(

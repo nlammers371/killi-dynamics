@@ -64,5 +64,5 @@ if __name__ == "__main__":
     stitched_ts.to_csv(out_dir / "cell_clusters_stitched.csv", index=False)
     # convert numpy scalars → native python scalars
     cfg_dict = json.loads(json.dumps(asdict(cluster_config)))
-    with open("cluster_tracking_config.yaml", "w") as f:
+    with open("_Archive/cluster_tracking_config.yaml", "w") as f:
         yaml.safe_dump(cfg_dict, f, sort_keys=False)

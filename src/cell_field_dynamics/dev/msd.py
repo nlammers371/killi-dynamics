@@ -9,7 +9,7 @@ import pandas as pd
 
 from .config import WindowConfig
 from .grids import GridBinResult, healpix_ang2pix
-from .vector_field import StepTable
+from src.cell_field_dynamics.vector_field import StepTable
 
 
 @dataclass(slots=True)

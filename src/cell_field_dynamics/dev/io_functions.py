@@ -13,8 +13,8 @@ from .grids import GridBinResult, HealpixIndexer
 from .materials import MaterialMetrics
 from .metrics import MetricCollection
 from .msd import MSDResult
-from .qc import QCResult
-from .vector_field import VectorFieldResult
+from src.cell_field_dynamics.qc import QCResult
+from src.cell_field_dynamics.vector_field import VectorFieldResult
 
 
 METRIC_GROUPS = {

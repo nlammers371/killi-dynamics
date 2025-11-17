@@ -6,10 +6,9 @@ from typing import Dict
 
 import numpy as np
 import pandas as pd
-from scipy.signal import savgol_filter
 
-from .config import SmoothingConfig, WindowConfig
-from .grids import (
+from src.cell_field_dynamics.dev.config import SmoothingConfig, WindowConfig
+from src.cell_field_dynamics.dev.grids import (
     GridBinResult,
     healpix_ang2pix,
     healpix_nside2npix,

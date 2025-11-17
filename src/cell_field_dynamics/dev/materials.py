@@ -9,7 +9,7 @@ from scipy.spatial import cKDTree
 
 from .config import MaterialsConfig, WindowConfig
 from .grids import GridBinResult
-from .vector_field import StepTable, build_step_table
+from src.cell_field_dynamics.vector_field import StepTable, build_step_table
 
 
 @dataclass(slots=True)

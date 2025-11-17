@@ -3,11 +3,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .config import QCConfig
-from .grids import GridBinResult
-from .metrics import MetricCollection
-from .msd import MSDResult
-from .materials import MaterialMetrics
+from src.cell_field_dynamics.dev.config import QCConfig
+from src.cell_field_dynamics.dev.grids import GridBinResult
+from src.cell_field_dynamics.dev.metrics import MetricCollection
+from src.cell_field_dynamics.dev.msd import MSDResult
+from src.cell_field_dynamics.dev.materials import MaterialMetrics
 from .vector_field import VectorFieldResult
 
 

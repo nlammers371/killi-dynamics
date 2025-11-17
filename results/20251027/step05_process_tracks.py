@@ -26,7 +26,7 @@ if __name__ == "__main__":
     mdl_path = Path(r"C:\Users\nlammers\Projects\killi-dynamics\src\classify_nuclei\models\nucleus_rf_classifier_v0.joblib")
 
     # first extract foreground intensities. Creates lightweight zarr arrays with only pixels within masks
-    # extract_foreground_intensities(root, project_name, n_workers=n_workers, overwrite=False)
+    extract_foreground_intensities(root, project_name, n_workers=n_workers, overwrite=False)
     compute_mean_fluo_from_foreground(root=root,
                                       project_name=project_name,
                                       tracking_config=tracking_config,
@@ -76,23 +76,23 @@ if __name__ == "__main__":
                         n_workers=n_workers)
 
 
-    build_tracked_mask_features(
-        root=root,
-        project_name=project_name,
-        seg_type=seg_type,
-        tracking_config=tracking_config,
-        well_num=well_num,
-        use_foreground=True,
-        used_optical_flow=flows_flag,
-        n_workers=n_workers,
-        mask_field="clean",
-        process_dropped_nuclei=True)
-
-    classify_cell_tracks(
-        root=root,
-        project_name=project_name,
-        tracking_config=tracking_config,
-        used_optical_flow=True,
-        classifier_path=mdl_path,
-        classify_dropped_nuclei=True,
-    )
+    # build_tracked_mask_features(
+    #     root=root,
+    #     project_name=project_name,
+    #     seg_type=seg_type,
+    #     tracking_config=tracking_config,
+    #     well_num=well_num,
+    #     use_foreground=True,
+    #     used_optical_flow=flows_flag,
+    #     n_workers=n_workers,
+    #     mask_field="clean",
+    #     process_dropped_nuclei=True)
+    #
+    # classify_cell_tracks(
+    #     root=root,
+    #     project_name=project_name,
+    #     tracking_config=tracking_config,
+    #     used_optical_flow=True,
+    #     classifier_path=mdl_path,
+    #     classify_dropped_nuclei=True,
+    # )

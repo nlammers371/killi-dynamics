@@ -13,7 +13,7 @@ if __name__ == "__main__":
     well_num = None
     n_workers = 12
     seg_type = "li_segmentation"
-    mdl_path = Path(r"C:\Users\nlammers\Projects\killi-dynamics\src\classify_nuclei\models\nucleus_rf_classifier_v0.joblib")
+    mdl_path = Path(r"/src/classify_nuclei/models/nucleus_rf_classifier_v0.joblib")
 
     # first extract foreground intensities. Creates lightweight zarr arrays with only pixels within masks
     # extract_foreground_intensities(root, project_name, n_workers=n_workers, overwrite=False)

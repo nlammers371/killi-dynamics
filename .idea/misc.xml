@@ -3,5 +3,9 @@
   <component name="Black">
     <option name="sdkName" value="turing-pde-env" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="kf-processing" project-jdk-type="Python SDK" />
+<<<<<<< HEAD
+  <component name="ProjectRootManager" version="2" project-jdk-name="ultrack" project-jdk-type="Python SDK" />
+=======
+  <component name="ProjectRootManager" version="2" project-jdk-name="killi-stats" project-jdk-type="Python SDK" />
+>>>>>>> 29cfb6ee7fa7e70547d6cd02bed150f47aca43a2
 </project>
