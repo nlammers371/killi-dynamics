@@ -5,6 +5,7 @@ from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map
 from functools import partial
 from src.data_io.zarr_io import open_experiment_array, open_mask_array
+from typing import Union
 # ===============================================================
 # 🧩 Worker helper — runs per timepoint
 # ===============================================================
@@ -15,7 +16,7 @@ def _extract_foreground_single(
     seg_type: str,
     mask_field: str,
     use_gpu: bool,
-    well_num: int | None,
+    well_num: Union[int, None],
     mask_store_path: Path,
     side_spec: str,
     fg_group_name: str,
@@ -72,7 +73,7 @@ def extract_foreground_intensities(
     seg_type: str = "li_segmentation",
     mask_field: str = "clean",
     overwrite: bool = False,
-    well_num: int | None = None,
+    well_num: Union[int, None] = None,
     n_workers: int = 1,
 ):
     """
