@@ -69,6 +69,8 @@ class VirtualFuseArray:
         # seam_sigma_px: tuple = (1.0, 0.5, 0.5),
         interp: Literal["nearest", "linear"] = "nearest",
     ):
+
+        # add basic attre
         self.store_path = Path(store_path)
         self.root = zarr.open_group(self.store_path, mode="a")
         self.is_mask = is_mask
@@ -160,6 +162,29 @@ class VirtualFuseArray:
     @staticmethod
     def _side_spatial(shape: Tuple[int, ...], meta: dict) -> Tuple[int, int, int]:
         return tuple(shape[meta["idx"][ax]] for ax in "ZYX")
+
+    # ---- basic array-like interface ----
+    def __len__(self):
+        """Return length along first axis (time)."""
+        return self.shape[0]
+
+    @property
+    def ndim(self):
+        """Number of array dimensions."""
+        return len(self.shape)
+
+    @property
+    def size(self):
+        """Total number of elements (product of shape)."""
+        from math import prod
+        return prod(self.shape)
+
+    def __array__(self, dtype=None):
+        """Allow implicit np.asarray() conversion."""
+        arr = np.asarray(self[:])  # materialize full array
+        if dtype is not None:
+            arr = arr.astype(dtype)
+        return arr
 
     # put this in the class (near other helpers)
     def _normalize_c_sel(self, side_group, meta, c_sel):
