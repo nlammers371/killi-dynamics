@@ -6,7 +6,7 @@ import zarr
 from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map
 from src.tracking.track_processing import _load_tracks
-
+import warnings
 def _mean_fluo_foreground_single(
     t: int,
     mask_zarr_path: Path,
@@ -47,6 +47,7 @@ def compute_mean_fluo_from_foreground(
     root: Path,
     project_name: str,
     tracking_config: str,
+    used_optical_flow: bool = True,
     tracking_range: tuple[int, int] | None = None,
     seg_type: str = "li_segmentation",
     side_key: str = "fused",
@@ -73,12 +74,20 @@ def compute_mean_fluo_from_foreground(
     n_t = mask_store.shape[0]
     # load tracks
     if tracking_config is not None:
-        _, tracking_dir = _load_tracks(root, project_name, tracking_config, tracking_range)
+        # flow_suffix = "_withflow" if used_optical_flow else ""
+        # tracking_config += flow_suffix
+        _, tracking_dir = _load_tracks(root, project_name, tracking_config, tracking_range, prefer_flow=used_optical_flow)
         mask_zarr_path_dst = tracking_dir / "segments.zarr"
     else:
-        mask_zarr_path_dst = mask_zarr_path_src
+        raise ValueError("No tracking config provided.")
+        # mask_zarr_path_dst = mask_zarr_path_src
 
-    n_channels = zarr.open_group(fg_group_path / "t0000", mode="r")["values"].shape[1]
+    out_path = tracking_dir / "tracks_fluo.csv"
+    if out_path.exists() and not overwrite:
+        warnings.warn(f"[compute_mean_fluo_from_foreground] Output exists, not overwriting: {out_path}")
+        return []
+
+    # n_channels = zarr.open_group(fg_group_path / "t0000", mode="r")["values"].shape[1]
 
     run_frame = partial(
         _mean_fluo_foreground_single,
@@ -97,7 +106,7 @@ def compute_mean_fluo_from_foreground(
     out_df = out_df.rename(columns={"mask_id": "track_id"})
     # tracks = tracks.merge(out_df, on=["track_id", "t"], how="left")
     if tracking_config is not None:
-        out_df.to_csv(tracking_dir / "tracks_fluo.csv", index=False)
+        out_df.to_csv(out_path, index=False)
     else:
         print("[compute_mean_fluo_from_foreground] No tracking config given, not saving output.")
         # pass
