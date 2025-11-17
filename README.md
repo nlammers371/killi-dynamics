@@ -6,7 +6,7 @@ utilities, segmentation and tracking pipelines, and higher-level cell-dynamics a
 ## Getting started
 
 ### Prerequisites
-- Python 3.10+ with access to GPU-enabled Cellpose if you plan to run 3D segmentation.
+- Python 3.10+ with. GPU is recommended for segmentation and viewing functionality. 
 - Bio-Formats compatible readers (`bioio`, `nd2`, `zarr`, `dask`) and scientific Python staples (`numpy`, `pandas`, `scipy`).
 - Raw ND2 or CZI acquisitions stored under a project root that also contains `built_data/` and `metadata/` sub-directories, as
   expected by the exporters and downstream pipelines.【F:src/data_io/czi_export.py†L134-L200】【F:src/data_io/nd2_export.py†L64-L118】
