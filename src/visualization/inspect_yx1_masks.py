@@ -15,10 +15,12 @@ project = "20250716"
 well_num = 11
 im_path = root / "built_data" / "zarr_image_files" / project / (project + f"_well{well_num:04}.zarr")
 mask_path = root / "built_data" / "mask_stacks" / "tdTom-bright-log-v5" / project / (project + f"_well{well_num:04}_mask_aff.zarr")
+mask_stack_path = root / "built_data" / "mask_stacks" / "tdTom-bright-log-v5" / project / (project + f"_well{well_num:04}_mask_stacks.zarr")
 sphere_path = root / "output_data" / "sphere_projections" / project / (f"well{well_num:04}_sphere_fits.csv")
 
 image_zarr = zarr.open(im_path, mode="r")
 mask_zarr = zarr.open(mask_path, mode="r")
+mask_stack_zarr = zarr.open(mask_stack_path, mode="r")
 sphere_df = pd.read_csv(sphere_path)
 
 # generate frame indices
@@ -33,7 +35,7 @@ scale_vec = tuple(image_zarr.attrs["voxel_size_um"])
 
 # extract relevant frames
 im_p = np.squeeze(image_zarr[nucleus_channel, t_start:t_stop])
-mask_p = mask_zarr[t_start:t_stop]
+mask_p = mask_stack_zarr[t_start:t_stop, 0]
 mask_clean = np.zeros_like(mask_p)
 for i, t in enumerate(frames):
     row = sphere_df.loc[sphere_df.t == t].iloc[0]
