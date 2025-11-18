@@ -8,11 +8,11 @@ import numpy as np
 import pandas as pd
 import zarr
 
-from .config import GridConfig, SmoothingConfig, WindowConfig, NoiseConfig
-from .grids import GridBinResult, HealpixIndexer
-from .materials import MaterialMetrics
-from .metrics import MetricCollection
-from .msd import MSDResult
+from src.cell_field_dynamics.config import GridConfig, SmoothingConfig, WindowConfig, NoiseConfig
+from src.cell_field_dynamics.grids import GridBinResult, HealpixIndexer
+from src.cell_field_dynamics.dev.materials import MaterialMetrics
+from src.cell_field_dynamics.metrics import MetricCollection
+from src.cell_field_dynamics.dev.msd import MSDResult
 from src.cell_field_dynamics.qc import QCResult
 from src.cell_field_dynamics.vector_field import VectorFieldResult
 
@@ -70,17 +70,18 @@ def _write_array(group: zarr.Group, name: str, data: np.ndarray, *, units: str) 
 def write_zarr_stores(
     out_root: Path,
     indexers: dict[int, HealpixIndexer],
-    binned: dict[int, GridBinResult],
+    # binned: dict[int, GridBinResult],
+    flux_results: dict[int, dict[str, np.ndarray]],
     vector_results: dict[int, VectorFieldResult],
     metric_results: dict[int, MetricCollection],
-    msd_results: dict[int, MSDResult],
-    material_results: dict[int, MaterialMetrics],
-    flux_results: dict[int, dict[str, np.ndarray]],
-    qc_results: dict[int, QCResult],
     grid_cfg: GridConfig,
     win_cfg: WindowConfig,
     smooth_cfg: SmoothingConfig,
     noise_cfg: NoiseConfig,
+    msd_results: dict[int, MSDResult] | None = None,
+    material_results: dict[int, MaterialMetrics] | None = None,
+    # qc_results: dict[int, QCResult],
+
 ) -> dict[int, Path]:
     """Write out Zarr stores for each grid."""
 
@@ -107,18 +108,20 @@ def write_zarr_stores(
             _write_array(drift_group, "divergence", vf.divergence.astype(np.float32), units="1/min")
             _write_array(drift_group, "curl", vf.curl.astype(np.float32), units="1/min")
 
-        msd_res = msd_results.get(nside)
-        if msd_res:
-            msd_group = root.require_group("msd")
-            _write_array(msd_group, "alpha", msd_res.msd_alpha.astype(np.float32), units="dimensionless")
-            _write_array(msd_group, "value", msd_res.msd_value.astype(np.float32), units="um^2")
+        if msd_results is not None:
+            msd_res = msd_results.get(nside)
+            if msd_res:
+                msd_group = root.require_group("msd")
+                _write_array(msd_group, "alpha", msd_res.msd_alpha.astype(np.float32), units="dimensionless")
+                _write_array(msd_group, "value", msd_res.msd_value.astype(np.float32), units="um^2")
 
-        mat_res = material_results.get(nside)
-        if mat_res:
-            mat_group = root.require_group("materials")
-            _write_array(mat_group, "cmsd_alpha", mat_res.cmsd_alpha.astype(np.float32), units="dimensionless")
-            _write_array(mat_group, "d2min_short", mat_res.d2min_short.astype(np.float32), units="a.u.")
-            _write_array(mat_group, "d2min_long", mat_res.d2min_long.astype(np.float32), units="a.u.")
+        if material_results is not None:
+            mat_res = material_results.get(nside)
+            if mat_res:
+                mat_group = root.require_group("materials")
+                _write_array(mat_group, "cmsd_alpha", mat_res.cmsd_alpha.astype(np.float32), units="dimensionless")
+                _write_array(mat_group, "d2min_short", mat_res.d2min_short.astype(np.float32), units="a.u.")
+                _write_array(mat_group, "d2min_long", mat_res.d2min_long.astype(np.float32), units="a.u.")
 
         flux_res = flux_results.get(nside)
         if flux_res:
@@ -126,13 +129,13 @@ def write_zarr_stores(
             _write_array(flux_group, "net", flux_res["net"].astype(np.float32), units="1/min")
             _write_array(flux_group, "throughput", flux_res["throughput"].astype(np.float32), units="um/min")
 
-        qc_res = qc_results.get(nside)
-        if qc_res:
-            qc_group = root.require_group("qc")
-            for key, mask in qc_res.masks.items():
-                _write_array(qc_group, f"{key}_valid", mask.astype(bool), units="bool")
-            for key, count in qc_res.counts.items():
-                _write_array(qc_group, f"{key}_counts", count.astype(np.int32), units="count")
+        # qc_res = qc_results.get(nside)
+        # if qc_res:
+        #     qc_group = root.require_group("qc")
+        #     for key, mask in qc_res.masks.items():
+        #         _write_array(qc_group, f"{key}_valid", mask.astype(bool), units="bool")
+        #     for key, count in qc_res.counts.items():
+        #         _write_array(qc_group, f"{key}_counts", count.astype(np.int32), units="count")
 
         zarr_paths[nside] = store_path
 

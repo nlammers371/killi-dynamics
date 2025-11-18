@@ -3,12 +3,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Dict
-
+from tqdm import tqdm
 import numpy as np
 import pandas as pd
 
-from .config import WindowConfig
-from .grids import GridBinResult, healpix_pix2vec
+from src.cell_field_dynamics.config import WindowConfig
+from src.cell_field_dynamics.grids import GridBinResult, healpix_pix2vec
 from src.cell_field_dynamics.vector_field import StepTable, VectorFieldResult, build_step_table, tangent_basis
 
 
@@ -170,7 +170,7 @@ def compute_scalar_metrics(
 
     half_window = win_cfg.win_minutes / 2.0
 
-    for nside, grid_result in binned.items():
+    for nside, grid_result in tqdm(binned.items(), desc="Computing scalar metrics"):
         arrays = _initialise_arrays(grid_result)
         vf = vector_results.get(nside, None)
 
@@ -207,8 +207,10 @@ def compute_scalar_metrics(
                 dt      = step_table.dt[indices]              # (N,)
                 vel3d   = step_table.velocities[indices]      # (N,3)
                 coords3d= step_table.mid_positions[indices]   # (N,3) embryo-centered mids
+
                 # center coords on the pixel center vector used for the tangent basis
-                coords_centered = coords3d - center_vec[None, :]
+                patch_center_xyz = center_vec * step_table.mean_radius
+                coords_centered = coords3d - patch_center_xyz[None, :]
 
                 # ---- path_speed (tangent) ----
                 # use tangent projection of displacements

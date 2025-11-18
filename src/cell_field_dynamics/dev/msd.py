@@ -7,8 +7,8 @@ from typing import Dict
 import numpy as np
 import pandas as pd
 
-from .config import WindowConfig
-from .grids import GridBinResult, healpix_ang2pix
+from src.cell_field_dynamics.config import WindowConfig
+from src.cell_field_dynamics.grids import GridBinResult, healpix_ang2pix
 from src.cell_field_dynamics.vector_field import StepTable
 
 

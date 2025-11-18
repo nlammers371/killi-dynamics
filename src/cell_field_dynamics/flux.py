@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import numpy as np
-
-from .grids import healpix_nside2npix
+from tqdm import tqdm
+from src.cell_field_dynamics.grids import healpix_nside2npix
 from src.cell_field_dynamics.vector_field import VectorFieldResult
 
 
@@ -17,7 +17,7 @@ def compute_flux_from_vector_field(
     flux_data: dict[int, dict[str, np.ndarray]] = {}
     radius = max(float(radius), 1e-6)
 
-    for nside, result in vector_results.items():
+    for nside, result in tqdm(vector_results.items(), desc="Computing Flux from vector field"):
         if result.drift.size == 0:
             flux_data[nside] = {"net": np.empty((0, 0), dtype=np.float32), "throughput": np.empty((0, 0), dtype=np.float32)}
             continue

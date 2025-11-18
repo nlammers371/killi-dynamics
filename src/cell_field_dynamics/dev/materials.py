@@ -7,8 +7,8 @@ import numpy as np
 import pandas as pd
 from scipy.spatial import cKDTree
 
-from .config import MaterialsConfig, WindowConfig
-from .grids import GridBinResult
+from src.cell_field_dynamics.config import MaterialsConfig, WindowConfig
+from src.cell_field_dynamics.grids import GridBinResult
 from src.cell_field_dynamics.vector_field import StepTable, build_step_table
 
 

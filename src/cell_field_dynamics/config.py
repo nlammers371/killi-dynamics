@@ -31,7 +31,7 @@ class WindowConfig:
 class SmoothingConfig:
     """Parameters for Savitzky–Golay smoothing of particle tracks."""
 
-    sg_window_minutes: float = 15.0
+    sg_window_minutes: float = 5.0
     sg_poly: int = 2
 
 

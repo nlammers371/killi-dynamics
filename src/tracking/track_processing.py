@@ -8,7 +8,7 @@ from src.data_io.track_io import _load_tracks
 from functools import partial
 import zarr
 from skimage.measure import regionprops_table
-
+from tqdm import tqdm
 
 def preprocess_tracks(df, ROLL_W=5, MOVE_THRESH=1.0, OVERLAP_MIN=5, MERGE_DIST=5.0):
     df = df.sort_values(["track_id", "t"]).copy()
@@ -225,9 +225,11 @@ def smooth_tracks(tracks: pd.DataFrame,
             unit="track",
         )
     else:
-        smoothed_groups = [
-            _smooth_single_track(g, coord_cols, sg_window_frames, sg_poly) for g in groups
-        ]
+        smoothed_groups = []
+        for g in tqdm(groups, desc="Smoothing tracks (serial)", unit="track"):
+            sg = _smooth_single_track(g, coord_cols, sg_window_frames, sg_poly)
+            smoothed_groups.append(sg)
+
 
     # flatten list-of-lists → list-of-dicts-
     rows = [row for chunk in smoothed_groups for row in chunk]
