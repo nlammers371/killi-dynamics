@@ -5,10 +5,6 @@ from dataclasses import dataclass
 import numpy as np
 from src.cell_field_dynamics.config import QCConfig
 from src.cell_field_dynamics.grids import GridBinResult
-from src.cell_field_dynamics.metrics import MetricCollection
-from src.cell_field_dynamics.dev.msd import MSDResult
-from src.cell_field_dynamics.dev.materials import MaterialMetrics
-from .vector_field import VectorFieldResult
 
 
 @dataclass(slots=True)

@@ -8,7 +8,7 @@ from src.tracking.track_processing import preprocess_tracks
 from sklearn.neighbors import BallTree
 from astropy.coordinates import SphericalRepresentation
 
-def compute_appearance_hp_region(tracks, frame_min, hp_col="hp_region"):
+def compute_appearance_hp_region(tracks, frame_min, hp_col="hp_region", calculate_vel_corr=False):
     """
     Compute healpix region where each track first appears inside the viewer's
     time window.
@@ -50,6 +50,63 @@ def compute_appearance_hp_region(tracks, frame_min, hp_col="hp_region"):
 
 
 def compute_surface_density(
+    df,
+    sphere_df=None,
+    xcol="x",
+    ycol="y",
+    zcol="z",
+    xcol_sphere="center_x_smooth",
+    ycol_sphere="center_y_smooth",
+    zcol_sphere="center_z_smooth",
+    radius=50.0,
+    project_to_sphere=False,
+):
+    """
+    Fixed-radius local density.
+    *** IMPORTANT: preserves original df index ***
+    """
+
+    # do NOT sort or reset index
+    density = np.full(len(df), np.nan)
+
+    # group using the *existing* index values
+    groups = df.groupby("t").groups   # this returns correct indices
+
+    for t, idxs in tqdm(groups.items(), desc="Computing fixed-radius densities..."):
+        idxs = np.array(idxs)
+
+        pts = df.loc[idxs, [xcol, ycol, zcol]].to_numpy()
+
+        if project_to_sphere:
+            if sphere_df is None:
+                raise ValueError("sphere_df required when project_to_sphere=True")
+
+            row = sphere_df.loc[sphere_df["t"] == t].iloc[0]
+            cx, cy, cz = row[xcol_sphere], row[ycol_sphere], row[zcol_sphere]
+            R = row["radius_smooth"]
+
+            v = pts - np.array([cx, cy, cz])
+            norm = np.linalg.norm(v, axis=1, keepdims=True)
+            unit = v / norm
+            pts = unit * R
+
+            cap_area = 2 * np.pi * R * radius
+        else:
+            cap_area = np.pi * radius * radius
+
+        tree = BallTree(pts)
+        # ind = tree.query_radius(pts, r=radius, count_only=False)
+
+        counts = tree.query_radius(pts, r=radius, count_only=True) - 1
+        dens = counts / cap_area
+
+        # This now correctly aligns with the original df index
+        density[idxs] = dens
+
+    return density
+
+
+def compute_vecolicy_correlation(
     df,
     sphere_df=None,
     xcol="x",

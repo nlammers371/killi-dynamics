@@ -1,14 +1,17 @@
-"""Vector-field estimation utilities for the cell-dynamics pipeline."""
+"""
+Vector-field estimation utilities for the cell-dynamics pipeline.
+REFORMATTED: fixed-time windows + neighbor-based spatial smoothing.
+"""
 from __future__ import annotations
 
+import numpy as np
+import pandas as pd
 from dataclasses import dataclass, field
 from typing import Dict, Optional
 from tqdm import tqdm
-import numpy as np
-import pandas as pd
 from tqdm.contrib.concurrent import process_map
-
-from src.cell_field_dynamics.config import WindowConfig
+from functools import partial
+from src.cell_field_dynamics.config import WindowConfig, SmoothingConfig
 from src.cell_field_dynamics.grids import (
     GridBinResult,
     healpix_ang2pix,
@@ -289,201 +292,255 @@ def _weighted_affine_fit(
     jac_local = beta[1:].T
     return drift_local, jac_local
 
-def _compute_single_timebin(
-    args: tuple[
-        int,              # t_index
-        float,            # center_time
-        np.ndarray,       # step_times
-        np.ndarray,       # unit_mid
-        np.ndarray,       # coords
-        np.ndarray,       # velocities
-        np.ndarray,       # pixel_vectors
-        np.ndarray,       # counts_row
-        float,            # time_sigma
-        float,            # space_sigma
-        float,            # mean_radius
-    ]
-):
-    (
-        t_index,
-        center_time,
-        step_times,
-        unit_mid,
-        coords,
-        velocities,
-        pixel_vectors,
-        counts_row,
-        time_sigma,
-        space_sigma,
-        mean_radius,
-    ) = args
+def _compute_single_timebin_neighbors(
+    t_index: int,
+    *,
+    center_times: np.ndarray,
+    step_times: np.ndarray,
+    unit_mid: np.ndarray,
+    coords: np.ndarray,
+    velocities: np.ndarray,
+    pix_indices: np.ndarray,
+    neighbors: list[np.ndarray],
+    pixel_vectors: np.ndarray,
+    space_sigma: float,
+    half_window: float,
+    mean_radius: float,
+) -> tuple[int, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Compute drift/div/curl/J for a single time bin using:
+      - hard temporal window |t - center_time| <= half_window
+      - neighbor prefilter in HEALPix space
+      - spatial Gaussian weights within that neighbor set
 
+    This is designed to be called via functools.partial with everything
+    bound except `t_index`, e.g.:
+
+        calculate = partial(
+            _compute_single_timebin_neighbors,
+            center_times=center_times,
+            step_times=step_table.mid_times,
+            unit_mid=step_table.unit_mid,
+            coords=step_table.mid_positions,
+            velocities=step_table.velocities,
+            pix_indices=step_table.pixel_indices(nside),
+            neighbors=neighbor_indexers[nside],
+            pixel_vectors=pixel_vectors,
+            space_sigma=space_sigma,
+            half_window=half_window,
+            mean_radius=step_table.mean_radius,
+        )
+    """
+
+    center_time = center_times[t_index]
     npix = pixel_vectors.shape[0]
 
+    # Output rows for this time bin
     drift_row = np.full((npix, 3), np.nan, dtype=np.float32)
     div_row   = np.full(npix, np.nan, dtype=np.float32)
     curl_row  = np.full(npix, np.nan, dtype=np.float32)
     jac_row   = np.full((npix, 2, 2), np.nan, dtype=np.float32)
 
-    # --- time weights ---
-    time_w = np.exp(-0.5 * ((step_times - center_time) / max(time_sigma, 1e-6))**2)
-    valid_t = time_w > 1e-6
-    if not np.any(valid_t):
-        return (t_index, drift_row, div_row, curl_row, jac_row)
+    # ---- temporal window ----
+    mask_t = np.abs(step_times - center_time) <= half_window
+    if not np.any(mask_t):
+        return t_index, drift_row, div_row, curl_row, jac_row
 
-    idx_t = np.nonzero(valid_t)[0]
-    time_w = time_w[idx_t]
-    coords_t = coords[idx_t]
-    vel_t = velocities[idx_t]
-    unit_t = unit_mid[idx_t]
+    idx_t   = np.nonzero(mask_t)[0]
+    unit_t  = unit_mid[idx_t]         # (Nt, 3)
+    coords_t = coords[idx_t]          # (Nt, 3)
+    vel_t   = velocities[idx_t]       # (Nt, 3)
+    pix_t   = pix_indices[idx_t]      # (Nt,)
 
-    # --- loop over pixels for this time bin ---
-    for pix in range(npix):
-        if counts_row[pix] == 0:
+    # Only bother with pixels that actually see any steps in this time window
+    for pix in np.unique(pix_t):
+        center_vec = pixel_vectors[pix]
+
+        # ---- restrict to neighbor pixels FIRST ----
+        neigh = neighbors[pix]  # array of pixel IDs for this center
+        if neigh.size == 0:
             continue
 
-        center_vec = pixel_vectors[pix]
-        e_theta, e_phi = tangent_basis(center_vec)
+        mask_local_pix = np.isin(pix_t, neigh)
+        if not np.any(mask_local_pix):
+            continue
 
-        cosang = np.clip(unit_t @ center_vec, -1.0, 1.0)
-        ang = np.arccos(cosang)
-        spatial = np.exp(-0.5 * (ang / space_sigma)**2)
+        # restrict to steps inside time window AND in neighbor pixels
+        local_idx = np.nonzero(mask_local_pix)[0]   # indices into idx_t
+        unit_loc   = unit_t[local_idx]
+        coords_loc = coords_t[local_idx]
+        vel_loc    = vel_t[local_idx]
 
-        weights = spatial * time_w
-        keep = weights > 1e-6
+        # ---- spatial Gaussian within neighbor set ----
+        # angular distance between step position and pixel center
+        cosang = np.clip(unit_loc @ center_vec, -1.0, 1.0)
+        ang    = np.arccos(cosang)
+        w_space = np.exp(-0.5 * (ang / space_sigma) ** 2)
+
+        keep = w_space > 1e-3
         if np.count_nonzero(keep) < 6:
             continue
 
-        w = weights[keep]
-        coords_sel = coords_t[keep]
-        vel_sel = vel_t[keep]
+        w          = w_space[keep]
+        coords_use = coords_loc[keep]
+        vel_use    = vel_loc[keep]
 
+        # ---- local tangent frame at pixel center ----
+        e_theta, e_phi = tangent_basis(center_vec)
+
+        # center coordinates on sphere
         patch_center_xyz = center_vec * mean_radius
-        coords_centered = coords_sel - patch_center_xyz
+        coords_centered  = coords_use - patch_center_xyz[None, :]
 
-        drift_local, jac_local = _weighted_affine_fit(
-            coords_centered, vel_sel, w, e_theta, e_phi
+        # ---- fit weighted affine flow in tangent plane ----
+        drift_loc, jac_loc = _weighted_affine_fit(
+            coords_centered,
+            vel_use,
+            w,
+            e_theta,
+            e_phi,
         )
 
-        drift_vec = drift_local[0] * e_theta + drift_local[1] * e_phi
+        # map drift back to 3D
+        drift_vec = drift_loc[0] * e_theta + drift_loc[1] * e_phi
 
         drift_row[pix] = drift_vec.astype(np.float32)
-        div_row[pix] = np.float32(np.trace(jac_local))
-        curl_row[pix] = np.float32(jac_local[1, 0] - jac_local[0, 1])
-        jac_row[pix] = jac_local.astype(np.float32)
+        div_row[pix]   = np.float32(np.trace(jac_loc))
+        curl_row[pix]  = np.float32(jac_loc[1, 0] - jac_loc[0, 1])
+        jac_row[pix]   = jac_loc.astype(np.float32)
 
-    return (t_index, drift_row, div_row, curl_row, jac_row)
-
+    return t_index, drift_row, div_row, curl_row, jac_row
 
 
 def compute_vector_field(
     tracks: pd.DataFrame,
     binned: dict[int, GridBinResult],
     win_cfg: WindowConfig,
-    step_table: StepTable | None = None,
+    smooth_cfg: SmoothingConfig,
+    step_table: StepTable,
+    neighbors: Optional[Dict[int, list[np.ndarray]]] = None,
+    min_steps: int = 5,
     n_workers: int = 1,
 ) -> dict[int, VectorFieldResult]:
 
+    # Build step table if needed
     if step_table is None:
         step_table = build_step_table(tracks)
 
     results: dict[int, VectorFieldResult] = {}
 
+    # trivial empty case
     if step_table.mid_times.size == 0:
-        for nside, result in tqdm(binned.items(), desc="Initializing vector fields"):
-            nt, npix = result.counts.shape
-            drift = np.full((nt, npix, 3), np.nan, dtype=np.float32)
-            divergence = np.full((nt, npix), np.nan, dtype=np.float32)
-            curl = np.full((nt, npix), np.nan, dtype=np.float32)
-            jac = np.full((nt, npix, 2, 2), np.nan, dtype=np.float32)
+        for nside, gr in binned.items():
+            nt, npix = gr.counts.shape
+            drift = np.full((nt, npix, 3), np.nan, np.float32)
+            div   = np.full((nt, npix),    np.nan, np.float32)
+            curl  = np.full((nt, npix),    np.nan, np.float32)
+            jac   = np.full((nt, npix, 2, 2), np.nan, np.float32)
             results[nside] = VectorFieldResult(
                 nside=nside,
-                time_centers=result.time_centers,
+                time_centers=gr.time_centers,
                 drift=drift,
-                divergence=divergence,
+                divergence=div,
                 curl=curl,
                 jacobian=jac,
             )
         return results
 
-
-    time_sigma = _fwhm_to_sigma(win_cfg.coarse_minutes)
-
-    # global refs (picklable)
+    # Reusable references
     step_times = step_table.mid_times
-    unit_mid = step_table.unit_mid
-    coords = step_table.mid_positions
-    velocities = step_table.velocities
-    mean_radius = step_table.mean_radius
+    unit_mid   = step_table.unit_mid
+    coords     = step_table.mid_positions
+    vel        = step_table.velocities
+    mean_R     = step_table.mean_radius
 
-    for nside, grid_result in tqdm(binned.items(), desc="Computing vector fields"):
+    # spatial sigma already in radians
+    space_sigma = smooth_cfg.sigma_radians
+    half_window = win_cfg.win_minutes / 2.0
 
-        nt, npix = grid_result.counts.shape
+    for nside, gr in tqdm(binned.items(), desc="Vector field levels"):
+        nt, npix = gr.counts.shape
 
-        drift = np.full((nt, npix, 3), np.nan, dtype=np.float32)
-        divergence = np.full((nt, npix), np.nan, dtype=np.float32)
-        curl = np.full((nt, npix), np.nan, dtype=np.float32)
-        jacobian = np.full((nt, npix, 2, 2), np.nan, dtype=np.float32)
+        drift = np.full((nt, npix, 3), np.nan, np.float32)
+        div   = np.full((nt, npix),    np.nan, np.float32)
+        curl  = np.full((nt, npix),    np.nan, np.float32)
+        jac   = np.full((nt, npix, 2, 2), np.nan, np.float32)
 
+        # No data → store empty container
         if nt == 0 or npix == 0:
             results[nside] = VectorFieldResult(
                 nside=nside,
-                time_centers=grid_result.time_centers,
+                time_centers=gr.time_centers,
                 drift=drift,
-                divergence=divergence,
+                divergence=div,
                 curl=curl,
-                jacobian=jacobian,
+                jacobian=jac,
             )
             continue
 
+        # Safety check
+        if neighbors is None or nside not in neighbors:
+            raise ValueError(f"neighbors[{nside}] missing for vector field")
+
+        neigh_nside = neighbors[nside]
+
+        # Healpix geometry
         pixel_vectors = healpix_pix2vec(nside, np.arange(npix, dtype=int))
-        pixel_area = 4.0 * np.pi / healpix_nside2npix(nside)
-        space_sigma = max(2*np.sqrt(pixel_area), 1e-3)
+        pix_indices = step_table.pixel_indices(nside)
 
-        # Prepare task list
-        tasks = [
-            (
-                t_index,
-                center_time,
-                step_times,
-                unit_mid,
-                coords,
-                velocities,
-                pixel_vectors,
-                grid_result.counts[t_index],
-                time_sigma,
-                space_sigma,
-                mean_radius,
-            )
-            for t_index, center_time in enumerate(grid_result.time_centers)
-        ]
-
-        # Run in parallel
-        outputs = process_map(
-            _compute_single_timebin,
-            tasks,
-            max_workers=n_workers,
-            chunksize=1,
-            desc=f"nside={nside} time bins"
+        # Build partial for multiprocessing
+        calculate_single = partial(
+            _compute_single_timebin_neighbors,
+            center_times=gr.time_centers,
+            step_times=step_times,
+            unit_mid=unit_mid,
+            coords=coords,
+            velocities=vel,
+            pix_indices=pix_indices,
+            neighbors=neigh_nside,
+            pixel_vectors=pixel_vectors,
+            space_sigma=space_sigma,
+            half_window=half_window,
+            mean_radius=mean_R,
         )
 
-        # Reassemble
-        for (t_index, drift_row, div_row, curl_row, jac_row) in outputs:
-            drift[t_index] = drift_row
-            divergence[t_index] = div_row
-            curl[t_index] = curl_row
-            jacobian[t_index] = jac_row
+        tasks = list(range(nt))
 
+        # Run worker pool
+        if n_workers == 1:
+            outputs = [
+                calculate_single(t_idx)
+                for t_idx in tqdm(tasks, desc=f"nside={nside}")
+            ]
+        else:
+            outputs = process_map(
+                calculate_single,
+                tasks,
+                max_workers=n_workers,
+                chunksize=1,
+                desc=f"vector nside={nside}",
+            )
+
+        # Unpack
+        for t_idx, drift_row, div_row, curl_row, jac_row in outputs:
+            drift[t_idx] = drift_row
+            div[t_idx]   = div_row
+            curl[t_idx]  = curl_row
+            jac[t_idx]   = jac_row
+
+        # Store result
         results[nside] = VectorFieldResult(
             nside=nside,
-            time_centers=grid_result.time_centers,
+            time_centers=gr.time_centers,
             drift=drift,
-            divergence=divergence,
+            divergence=div,
             curl=curl,
-            jacobian=jacobian,
+            jacobian=jac,
         )
 
     return results
+
+
 
 # def compute_vector_field(
 #     tracks: pd.DataFrame,

@@ -10,7 +10,8 @@ import zarr
 
 from src.cell_field_dynamics.config import GridConfig, SmoothingConfig, WindowConfig, NoiseConfig
 from src.cell_field_dynamics.grids import GridBinResult, HealpixIndexer
-from src.cell_field_dynamics.dev.materials import MaterialMetrics
+from src.cell_field_dynamics.materials import MaterialMetrics
+from src.cell_field_dynamics.density import DensityFieldResult
 from src.cell_field_dynamics.metrics import MetricCollection
 from src.cell_field_dynamics.dev.msd import MSDResult
 from src.cell_field_dynamics.qc import QCResult
@@ -21,6 +22,7 @@ METRIC_GROUPS = {
     "path_speed": ("path_speed", "um/min"),
     "drift_speed": ("drift_speed", "um/min"),
     "theta_entropy": ("theta_entropy", "dimensionless"),
+    "alignment": ("alignment", "dimensionless"),
     "diffusivity_total": ("diffusivity_total", "um^2/min"),
     "diffusivity_idio": ("diffusivity_idio", "um^2/min"),
 }
@@ -45,12 +47,11 @@ def _write_root_attrs(
             "nside": int(nside),
             "win_minutes": float(win_cfg.win_minutes),
             "stride_minutes": float(win_cfg.stride_minutes),
-            "coarse_minutes": float(win_cfg.coarse_minutes),
-            "fine_minutes": float(win_cfg.fine_minutes),
-            "sg_window_frames": int(smooth_cfg.sg_window_frames),
+            "sg_window_frames": int(smooth_cfg.sg_window_minutes),
+            "sigma_space_um": float(smooth_cfg.sigma_space_um),
             "sg_poly": int(smooth_cfg.sg_poly),
-            "sigma_loc_um": (noise_cfg.fixed_sigma_loc_um or 0.0),
-            "sigma_loc_method": noise_cfg.method,
+            # "sigma_loc_um": (noise_cfg.fixed_sigma_loc_um or 0.0),
+            # "sigma_loc_method": noise_cfg.method,
         }
     )
 
@@ -60,6 +61,7 @@ def _write_array(group: zarr.Group, name: str, data: np.ndarray, *, units: str) 
         name,
         shape=data.shape,
         dtype=data.dtype,
+        chunk=(1, data.shape[1:]),
         compressor=zarr.Blosc(cname="zstd", clevel=3, shuffle=zarr.Blosc.BITSHUFFLE),
         overwrite=True,
     )
@@ -71,13 +73,15 @@ def write_zarr_stores(
     out_root: Path,
     indexers: dict[int, HealpixIndexer],
     # binned: dict[int, GridBinResult],
-    flux_results: dict[int, dict[str, np.ndarray]],
-    vector_results: dict[int, VectorFieldResult],
-    metric_results: dict[int, MetricCollection],
     grid_cfg: GridConfig,
     win_cfg: WindowConfig,
     smooth_cfg: SmoothingConfig,
     noise_cfg: NoiseConfig,
+    grid_results: dict[int, GridBinResult] | None = None,
+    flux_results: dict[int, dict[str, np.ndarray]] | None = None,
+    vector_results: dict[int, VectorFieldResult] | None = None,
+    metric_results: dict[int, MetricCollection] | None = None,
+    density_results: dict[int, DensityFieldResult] | None = None,
     msd_results: dict[int, MSDResult] | None = None,
     material_results: dict[int, MaterialMetrics] | None = None,
     # qc_results: dict[int, QCResult],
@@ -89,24 +93,40 @@ def write_zarr_stores(
     for nside, indexer in indexers.items():
         store_path = Path(out_root) / f"fields_nside{nside:04d}.zarr"
         store = zarr.DirectoryStore(store_path)
-        root = zarr.group(store=store, overwrite=True)
+        root = zarr.open(store=store, mode="w")
 
         _write_root_attrs(root, nside, grid_cfg, win_cfg, smooth_cfg, noise_cfg)
 
-        metrics_group = root.require_group("metrics")
-        scalar_metrics = metric_results.get(nside)
-        if scalar_metrics:
-            for key, (dataset_name, units) in METRIC_GROUPS.items():
-                data = scalar_metrics.data.get(key)
-                if data is not None:
-                    _write_array(metrics_group, dataset_name, data.astype(np.float32), units=units)
+        if grid_results is not None:
+            grid_group = root.require_group("grid")
+            gf = grid_results.get(nside)
+            if gf:
+                _write_array(grid_group, "time_centers", gf.time_centers.astype(np.float32), units="minutes")
+                _write_array(grid_group, "counts", gf.counts.astype(np.int32), units="counts")
 
-        vf = vector_results.get(nside)
-        if vf:
-            drift_group = root.require_group("drift")
-            _write_array(drift_group, "vector", vf.drift.astype(np.float32), units="um/min")
-            _write_array(drift_group, "divergence", vf.divergence.astype(np.float32), units="1/min")
-            _write_array(drift_group, "curl", vf.curl.astype(np.float32), units="1/min")
+        if metric_results is not None:
+            metrics_group = root.require_group("metrics")
+            scalar_metrics = metric_results.get(nside)
+            if scalar_metrics:
+                for key, (dataset_name, units) in METRIC_GROUPS.items():
+                    data = scalar_metrics.data.get(key)
+                    if data is not None:
+                        _write_array(metrics_group, dataset_name, data.astype(np.float32), units=units)
+
+        if vector_results is not None:
+            vf = vector_results.get(nside)
+            if vf:
+                drift_group = root.require_group("drift")
+                _write_array(drift_group, "vector", vf.drift.astype(np.float32), units="um/min")
+                _write_array(drift_group, "divergence", vf.divergence.astype(np.float32), units="1/min")
+                _write_array(drift_group, "curl", vf.curl.astype(np.float32), units="1/min")
+
+        if density_results is not None:
+            density_res = density_results.get(nside)
+            if density_res:
+                density_group = root.require_group("density")
+                _write_array(density_group, "field", density_res.density.astype(np.float32), units="cells/um^2")
+                _write_array(density_group, "fluo", density_res.mean_fluo.astype(np.float32), units="au")
 
         if msd_results is not None:
             msd_res = msd_results.get(nside)
@@ -123,11 +143,12 @@ def write_zarr_stores(
                 _write_array(mat_group, "d2min_short", mat_res.d2min_short.astype(np.float32), units="a.u.")
                 _write_array(mat_group, "d2min_long", mat_res.d2min_long.astype(np.float32), units="a.u.")
 
-        flux_res = flux_results.get(nside)
-        if flux_res:
-            flux_group = root.require_group("flux")
-            _write_array(flux_group, "net", flux_res["net"].astype(np.float32), units="1/min")
-            _write_array(flux_group, "throughput", flux_res["throughput"].astype(np.float32), units="um/min")
+        if flux_results is not None:
+            flux_res = flux_results.get(nside)
+            if flux_res:
+                flux_group = root.require_group("flux")
+                _write_array(flux_group, "net", flux_res["net"].astype(np.float32), units="1/min")
+                _write_array(flux_group, "throughput", flux_res["throughput"].astype(np.float32), units="um/min")
 
         # qc_res = qc_results.get(nside)
         # if qc_res:

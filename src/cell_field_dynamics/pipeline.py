@@ -19,30 +19,6 @@ from src.data_io.track_io import _load_track_data
 from src.tracking.track_processing import add_sphere_coords_to_tracks, smooth_tracks
 
 
-# def _normalise_tracking_output(data: Any) -> tuple[pd.DataFrame, pd.DataFrame]:
-#     """Normalise the return signature from :func:`load_tracking_data`."""
-#
-#     if isinstance(data, tuple):
-#         if len(data) == 2:
-#             first, second = data
-#         elif len(data) >= 3:
-#             first, second = data[:2]
-#         else:
-#             raise ValueError("Unexpected tuple length returned by load_tracking_data")
-#     else:
-#         raise TypeError("load_tracking_data must return a tuple of DataFrames")
-#
-#     if "particle" in getattr(first, "columns", []):
-#         tracks_df, sphere_df = first, second
-#     else:
-#         sphere_df, tracks_df = first, second
-#
-#     if not isinstance(tracks_df, pd.DataFrame) or not isinstance(sphere_df, pd.DataFrame):
-#         raise TypeError("load_tracking_data must return pandas.DataFrame objects")
-
-    # return sphere_df, tracks_df
-
-
 def run(
     root: Path,
     project_name: str,
@@ -77,7 +53,8 @@ def run(
                                             prefer_flow=flows_flag,)
     if deep_cells_only:
         tracks_df = tracks_df[tracks_df["track_class"] == 0]
-        tracks_df = tracks_df[tracks_df["t"] < 100]
+        tracks_df = tracks_df[(tracks_df["t"] > 1250) & (tracks_df["t"] <= 1300)]
+        # tracks_df = tracks_df[(tracks_df["t"] <= 5)]
         tracks_df = tracks_df.reset_index(drop=True)
 
     # sphere_df, tracks_df = _normalise_tracking_output(data)
@@ -91,25 +68,49 @@ def run(
 
     # smoothed_tracks = smooth_tracks(tracks_df, smooth_cfg, metadata["time_resolution_s"] / 60)
     smoothed_tracks = add_sphere_coords_to_tracks(smoothed_tracks, sphere_df)
+    step_table = vector_field.build_step_table(smoothed_tracks, fluo_col="mean_fluo")
+    sphere_radius = step_table.mean_radius
 
-    grid_indexers = grids.build_healpix_indexers(grid_cfg.nsides)
+    # update smoothing config with sphere radius
+    smooth_cfg.sphere_radius_um = sphere_radius
+
+    grid_indexers, neighbor_indexers = grids.build_healpix_indexers(grid_cfg.nsides,
+                                                                    smooth_cfg=smooth_cfg)
     binned_tracks = grids.bin_tracks_over_time(
-        smoothed_tracks,
-        grid_indexers,
-        grid_cfg,
+                                            smoothed_tracks,
+                                            grid_indexers,
+                                            grid_cfg,
+                                            win_cfg,
+                                        )
+
+    density_results = density.compute_healpix_density_field(
+        step_table,
+        binned_tracks,
         win_cfg,
+        neighbors=neighbor_indexers,
+        smooth_cfg=smooth_cfg,
+        n_workers=n_workers,
     )
-
-    step_table = vector_field.build_step_table(smoothed_tracks)
-
-    density_results = density.compute_healpix_density_field(step_table, binned_tracks, win_cfg)
 
     vector_results = vector_field.compute_vector_field(
-        smoothed_tracks, binned_tracks, win_cfg, step_table=step_table, n_workers=n_workers
-    )
+                                                    smoothed_tracks,
+                                                    binned_tracks,
+                                                    win_cfg,
+                                                    smooth_cfg=smooth_cfg,
+                                                    neighbors=neighbor_indexers,
+                                                    step_table=step_table,
+                                                    n_workers=n_workers
+                                                )
+
     metric_results = metrics.compute_scalar_metrics(
-        smoothed_tracks, vector_results, binned_tracks, win_cfg, step_table=step_table
-    )
+                                    smoothed_tracks,
+                                    vector_results,
+                                    binned_tracks,
+                                    win_cfg,
+                                    smooth_cfg=smooth_cfg,
+                                    step_table=step_table,
+                                    neighbors=neighbor_indexers,
+                                )
     # msd_results = msd.compute_msd_metrics(smoothed_tracks, binned_tracks, win_cfg, step_table=step_table)
     # material_results = materials.compute_material_metrics(
     #     smoothed_tracks, binned_tracks, mat_cfg, win_cfg, step_table=step_table
@@ -130,19 +131,17 @@ def run(
     # )
 
     zarr_paths = io_functions.write_zarr_stores(
-        out_root,
-        grid_indexers,
-        binned_tracks,
-        vector_results,
-        metric_results,
-        # msd_results,
-        # material_results,
-        flux_results,
-        qc_results,
-        grid_cfg,
-        win_cfg,
-        smooth_cfg,
-        noise_cfg,
+        out_root=out_root,
+        indexers=grid_indexers,
+        grid_results=binned_tracks,
+        flux_results=flux_results,
+        vector_results=vector_results,
+        metric_results=metric_results,
+        density_results=density_results,
+        grid_cfg=grid_cfg,
+        win_cfg=win_cfg,
+        smooth_cfg=smooth_cfg,
+        noise_cfg=noise_cfg,
     )
 
     # augmented_tracks, tracks_path = io_functions.augment_tracks_df(
@@ -172,9 +171,9 @@ def run(
     #     },
     # }
 
-    summary["tracks_preview"] = augmented_tracks.head().to_dict(orient="list")
+    # summary["tracks_preview"] = augmented_tracks.head().to_dict(orient="list")
 
-    return summary
+    return {}
 
 
 __all__ = ["run"]
@@ -193,8 +192,9 @@ if __name__ == "__main__":
         project_name=project_name,
         track_config_name=tracking_config,
         flows_flag=flows_flag,
-        grid_cfg=GridConfig(nsides=[8, 16]),
-        win_cfg=WindowConfig(win_minutes=30.0, stride_minutes=10.0),
-        n_workers=12,
+        grid_cfg=GridConfig(nsides=[8]),
+        smooth_cfg=SmoothingConfig(sigma_space_um=45.0),
+        win_cfg=WindowConfig(win_minutes=9.0, stride_minutes=3),
+        n_workers=1,
     )
     pprint.pprint(result_summary)

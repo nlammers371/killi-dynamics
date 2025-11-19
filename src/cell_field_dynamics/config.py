@@ -21,18 +21,25 @@ class GridConfig:
 class WindowConfig:
     """Parameters describing temporal windowing of the tracks."""
 
-    win_minutes: float = 60.0  # window size for binned dynamics
-    stride_minutes: float = 15.0  # stride between windows
-    coarse_minutes: float = 45.0  # ??
-    fine_minutes: float = 15.0  # ??
+    win_minutes: float = 45.0  # window size for binned dynamics
+    stride_minutes: float = 1.5  # stride between windows
 
 
 @dataclass(slots=True)
 class SmoothingConfig:
     """Parameters for Savitzky–Golay smoothing of particle tracks."""
-
     sg_window_minutes: float = 5.0
     sg_poly: int = 2
+    sigma_space_um: float = 25.0
+
+    sphere_radius_um: float | None = None
+
+    @property
+    def sigma_radians(self) -> float | None:
+        """Spatial smoothing sigma in radians, if sphere radius is set."""
+        if self.sphere_radius_um is None:
+            return None
+        return self.sigma_space_um / self.sphere_radius_um
 
 
 @dataclass(slots=True)
