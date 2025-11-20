@@ -25,7 +25,8 @@ def parse_track_paths(root: Path,
         tracking_dir = f_paths[0]
         return tracking_dir
     elif prefer_flow and len(nf_paths) > 0:
-        warnings.warn(f"Preferred optical flow tracking, but none found in {tracking_root}. Using non-flow tracking.")
+        raise FileNotFoundError(f"Preferred optical flow tracking, but none found in {tracking_root}")
+        # warnings.warn(f"Preferred optical flow tracking, but none found in {tracking_root}. Using non-flow tracking.")
     elif not prefer_flow and len(nf_paths) > 0:
         tracking_dir = nf_paths[0]
         return tracking_dir
@@ -74,6 +75,8 @@ def _load_tracks(root: Path,
 
     if prefer_smoothed and (tracking_dir / "tracks_smoothed.csv").is_file():
         tracks = pd.read_csv(tracking_dir / "tracks_smoothed.csv")
+    elif prefer_smoothed:
+        raise FileNotFoundError(f"Preferred smoothed tracks, but none found in {tracking_dir}")
     else:
         tracks = pd.read_csv(tracking_dir / "tracks.csv")
 

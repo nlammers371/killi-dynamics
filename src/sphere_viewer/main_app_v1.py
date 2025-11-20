@@ -11,7 +11,7 @@ from magicgui import magicgui
 from pathlib import Path
 from src.sphere_viewer.app_helpers import process_tracks, compute_appearance_hp_region
 # if you have this in your project, keep it; otherwise stub it
-from src.data_io.track_io import _load_track_data
+from src.data_io.track_io import _load_track_data, _load_tracks
 
 
 def add_backdrop_sphere(
@@ -276,20 +276,39 @@ def add_timeaware_points_layer(
     # --------------------------------
     # Color logic (unchanged)
     # --------------------------------
-    vals = m[point_var].to_numpy()
+    vals_raw = m[point_var].to_numpy()
+
+    # 1) Replace NaNs with sentinel
+    sentinel = -1000.0
+    vals = vals_raw.copy()
+    mask_nan = np.isnan(vals)
+    vals[mask_nan] = sentinel
+
     cmap = plt.get_cmap(point_cmap)
 
+    # 2) Floating vs categorical logic unchanged
     if np.issubdtype(vals.dtype, np.floating):
-        vmin0, vmax0 = vals.min(), vals.max()
-        normed = (vals - vmin0) / (vmax0 - vmin0 + 1e-9)
-    else:
-        uniq = np.unique(vals)
-        idx_map = {u: i for i, u in enumerate(uniq)}
-        idx = np.array([idx_map[v] for v in vals], dtype=float)
-        normed = idx / max(len(uniq) - 1, 1)
-        vmin0, vmax0 = 0, 1  # categorical fallback
+        # IMPORTANT: ignore sentinel when computing min/max
+        vmin0 = np.percentile(vals[~mask_nan], 1) if (~mask_nan).any() else 0.0
+        vmax0 = np.percentile(vals[~mask_nan], 99) if (~mask_nan).any() else 1.0
 
+        # Normalization only for non-NaN values
+        normed = np.empty_like(vals, dtype=float)
+        normed[~mask_nan] = (vals[~mask_nan] - vmin0) / (vmax0 - vmin0 + 1e-9)
+        normed[mask_nan] = 0.0  # placeholder (we override color anyway)
+
+    else:
+        uniq = np.unique(vals[~mask_nan])
+        idx_map = {u: i for i, u in enumerate(uniq)}
+        idx = np.array([idx_map[v] if v in idx_map else 0 for v in vals], dtype=float)
+        normed = idx / max(len(uniq) - 1, 1)
+        # vmin0, vmax0 = 0, 1
+
+    # 3) Get the colormap
     face_color = np.asarray(cmap(normed)[:, :4], dtype=np.float32)
+
+    # 4) Override NaN/sentinel points to gray
+    face_color[mask_nan] = np.array([0.5, 0.5, 0.5, 1.0], dtype=np.float32)
 
     # --------------------------------
     # Add layer
@@ -300,7 +319,9 @@ def add_timeaware_points_layer(
         face_color=face_color,
         name=f"points_{point_var}",
         blending="translucent",
-        properties={point_var: vals},   # <--- critical, store raw vals
+
+        # raw values including real NaN preserved
+        properties={point_var: vals_raw},
     )
 
     # ---------------------------------------------------------
@@ -685,6 +706,23 @@ def launch_sv_wrapper(
         prefer_flow=used_flow,
     )
 
+    _, tracking_dir = _load_tracks(
+        root=root,
+        project_name=project_name,
+        tracking_config=tracking_config,
+        prefer_smoothed=True,
+        prefer_flow=used_flow,
+    )
+    metric_file = tracking_dir / "cell_dynamics_metrics.csv"
+    if metric_file.is_file():
+        metrics = pd.read_csv(metric_file)
+        # tracking_dircks = tracks.merge(
+        #     metrics,
+        #     on=["track_id", "t"],
+        #     how="left",
+        # )
+    else:
+        metrics = None
 
     candidate_cols = [
         "mean_fluo",
@@ -699,6 +737,7 @@ def launch_sv_wrapper(
     tracks, added_cols = process_tracks(
         tracks,
         sphere,
+        metrics,
         deep_cells_only=deep_cells_only,
         remove_stationary=True,
     )
@@ -747,7 +786,7 @@ if __name__ == "__main__":
         show_points=True,
         show_tracks=True,
         show_patches=False,
-        frame_range=(1200, 1250),
-        cell_radius=12.5,
-        n_workers=12,
+        frame_range=(800, 930),
+        cell_radius=18,
+        n_workers=1,
     )

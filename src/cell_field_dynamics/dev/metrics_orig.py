@@ -193,96 +193,70 @@ def local_alignment_C(vel3d: np.ndarray, speed_tol: float = 1e-6) -> float:
 
 # ---------------- core worker (neighbor-based) ----------------
 def _compute_scalar_metrics_single_t(
-    t_index: int,
-    time_centers: np.ndarray,
-    pixel_vectors: np.ndarray,
-    pix_indices: np.ndarray,           # (N,) step → pixel index at this nside
-    neighbors: list[np.ndarray],       # neighbors[pix] = array of pixel IDs
-    step_table: StepTable,
-    vf: Optional[VectorFieldResult],
-    half_window: float,
-    space_sigma: float,                # radians
-    min_steps_per_bin: int,
-) -> tuple[int, dict[str, np.ndarray]]:
+        t_index,
+        time_centers,
+        space_sigma,
+        pixel_vectors,
+        pix_indices,
+        step_table,
+        vf,
+        half_window,
+        min_steps_per_bin,
+    ):
 
     npix = pixel_vectors.shape[0]
     center_time = time_centers[t_index]
-
     # Allocate one row per metric
-    row = {
-        name: np.full(npix, np.nan, dtype=np.float32)
-        for name in DEFAULT_METRIC_NAMES
-    }
+    row = {name: np.full(npix, np.nan, dtype=np.float32)
+           for name in DEFAULT_METRIC_NAMES}
 
-    # ---- Select steps in temporal window ----
+    # ---- Select steps in the temporal window ----
     times = step_table.mid_times
     mask_time = np.abs(times - center_time) <= half_window
     if not np.any(mask_time):
         return t_index, row
 
     idx_time = np.nonzero(mask_time)[0]
-    unit_t   = step_table.unit_mid[idx_time]      # (Nt, 3)
-    pix_t    = pix_indices[idx_time]              # (Nt,)
+    pix_time = pix_indices[idx_time]
+    unit_time_positions = step_table.unit_mid[idx_time]   # (Nt, 3)
 
-    # Pre-extract arrays we’ll need
-    disp_all  = step_table.displacements
-    dt_all    = step_table.dt
-    vel_all   = step_table.velocities
-    coords_all = step_table.mid_positions
-    track_ids_all = step_table.track_ids
-    times_all     = step_table.mid_times
+    # ---- Process each pixel having steps in this window ----
+    for pix in np.unique(pix_time):
 
-    mean_R = step_table.mean_radius
+        center_vec = pixel_vectors[pix]    # unit 3D direction of pixel center
 
-    # ---- Loop over all pixels (neighbor logic will keep things sparse) ----
-    for pix in range(npix):
-        center_vec = pixel_vectors[pix]  # unit 3D direction of pixel center
+        # --- Spatial Gaussian weights ---
+        cosang = np.clip(unit_time_positions @ center_vec, -1.0, 1.0)
+        ang = np.arccos(cosang)                                    # angular distance
+        weights_all = np.exp(-0.5 * (ang / space_sigma) ** 2)      # Gaussian kernel
 
-        # restrict steps to pixels in neighbor list
-        neigh = neighbors[pix]           # array of neighbor pixel IDs
-        mask_local = np.isin(pix_t, neigh)
-        if not np.any(mask_local):
-            continue
-
-        local_idx = np.nonzero(mask_local)[0]   # indices into idx_time
-        step_idx  = idx_time[local_idx]         # global step indices
-
-        # spatial weights: angular distance
-        unit_loc = unit_t[local_idx]           # (N_loc, 3)
-        cosang = np.clip(unit_loc @ center_vec, -1.0, 1.0)
-        ang = np.arccos(cosang)                # radians
-        w_space = np.exp(-0.5 * (ang / space_sigma) ** 2)
-
-        valid_local = w_space > 1e-2
+        valid_local = weights_all > 1e-3
         if np.count_nonzero(valid_local) < min_steps_per_bin:
             continue
 
-        step_idx = step_idx[valid_local]
-        w = w_space[valid_local]
+        # Fix indexing bug: remap local mask to global indices
+        local_idx = np.nonzero(valid_local)[0]       # into idx_time
+        indices = idx_time[local_idx]                # global step indices
+        w = weights_all[local_idx]                   # weights aligned to indices
 
-        # Extract step-wise arrays in this neighborhood
-        disp3d   = disp_all[step_idx]          # (N,3)
-        dt       = dt_all[step_idx]            # (N,)
-        vel3d_pix = vel_all[step_idx]          # (N,3)
-        coords3d = coords_all[step_idx]        # (N,3)
-        track_ids = track_ids_all[step_idx]
-        times_sel = times_all[step_idx]
+        # Extract needed arrays
+        disp3d = step_table.displacements[indices]     # (N,3)
+        dt = step_table.dt[indices]                    # (N,)
+        vel3d_pix = step_table.velocities[indices]     # (N,3)
+        coords3d = step_table.mid_positions[indices]   # (N,3)
 
-        # Tangent basis & centered coords
+        # Tangent basis at this pixel
         e_theta, e_phi = tangent_basis(center_vec)
-        patch_center_xyz = center_vec * mean_R
+
+        patch_center_xyz = center_vec * step_table.mean_radius
         coords_centered = coords3d - patch_center_xyz[None, :]
 
         # ---- PATH SPEED (weighted) ----
         disp_tan = np.column_stack((disp3d @ e_theta, disp3d @ e_phi))
         speed_tan = np.linalg.norm(disp_tan, axis=1) / np.maximum(dt, 1e-6)
-        try:
-            row["path_speed"][pix] = np.float32(np.average(speed_tan, weights=w))
-        except ZeroDivisionError:
-            # extremely unlikely given valid_local check, but guard anyway
-            pass
+        row["path_speed"][pix] = np.float32(np.average(speed_tan, weights=w))
 
-        # ---- DRIFT SPEED (grid-level) ----
+        # ---- DRIFT SPEED (use vf.drift as-is) ----
         if vf is not None:
             row["drift_speed"][pix] = np.float32(
                 np.linalg.norm(vf.drift[t_index, pix])
@@ -293,40 +267,42 @@ def _compute_scalar_metrics_single_t(
         good = spd3d > 1e-6
 
         if np.count_nonzero(good) >= 2:
-            v = vel3d_pix[good]               # (M,3)
-            w_good = w[good]                  # (M,)
 
+            v = vel3d_pix[good]                # (M,3)
+            w_good = w[good]                   # weights aligned to these velocities
             vhat = v / np.linalg.norm(v, axis=1, keepdims=True)
+
+            # pairwise dots
             dots = vhat @ vhat.T
             np.clip(dots, -1.0, 1.0, out=dots)
 
             i, j = np.triu_indices(vhat.shape[0], k=1)
-            theta = np.arccos(dots[i, j])     # pairwise misalignment angles
+            theta = np.arccos(dots[i, j])
 
-            # pairwise weights ~ w_i * w_j
             pair_w = (w_good[:, None] * w_good[None, :])[i, j]
 
-            # weighted theta entropy
+            # --- weighted theta entropy ---
             row["theta_entropy"][pix] = np.float32(
                 weighted_theta_entropy(theta, pair_w)
             )
 
-            # weighted alignment C_local
+            # --- weighted local alignment ---
+            # C_local = sum(w_i w_j dot) / sum(w_i w_j)
             C_num = np.sum(pair_w * dots[i, j])
             C_den = np.sum(pair_w)
             if C_den > 0:
                 row["alignment"][pix] = np.float32(C_num / C_den)
 
-        # ---- DIFFUSIVITY TOTAL (unweighted, but same subset) ----
+        # ---- DIFFUSIVITY TOTAL (unweighted for now) ----
         D_total, _ = _cve_diffusivity_with_times(
             disp_tan=disp_tan,
             dt=dt,
-            track_ids=track_ids,
-            times=times_sel,
+            track_ids=step_table.track_ids[indices],
+            times=step_table.mid_times[indices],
         )
         row["diffusivity_total"][pix] = np.float32(D_total)
 
-        # ---- DIFFUSIVITY IDIO (unweighted, but same subset) ----
+        # ---- DIFFUSIVITY IDIO (unweighted for now) ----
         if vf is not None:
             drift_vec = vf.drift[t_index, pix]
             J_tan = vf.jacobian[t_index, pix] if vf.jacobian is not None else None
@@ -344,8 +320,8 @@ def _compute_scalar_metrics_single_t(
             D_idio, _ = _cve_diffusivity_with_times(
                 disp_tan=disp_res_aff,
                 dt=dt,
-                track_ids=track_ids,
-                times=times_sel,
+                track_ids=step_table.track_ids[indices],
+                times=step_table.mid_times[indices],
             )
             row["diffusivity_idio"][pix] = np.float32(D_idio)
 
@@ -395,8 +371,8 @@ def compute_scalar_metrics(
         # if sigma_space_um is not None:
         #     space_sigma = max(sigma_space_um / sphere_radius, 1e-6)
         # else:
-        #     pixel_area_unit = 4.0 * np.pi / npix_total
-        #     space_sigma = max(np.sqrt(pixel_area_unit), 1e-6)
+        pixel_area_unit = 4.0 * np.pi / npix_total
+        space_sigma = max(np.sqrt(pixel_area_unit), 1e-6)
 
         pixel_vectors = healpix_pix2vec(nside, np.arange(npix, dtype=int))
         pix_indices = step_table.pixel_indices(nside)
@@ -415,7 +391,7 @@ def compute_scalar_metrics(
             time_centers=time_centers,
             pixel_vectors=pixel_vectors,
             pix_indices=pix_indices,
-            neighbors=neighbors_nside,
+            # neighbors=neighbors_nside,
             step_table=step_table,
             vf=vf,
             half_window=half_window,

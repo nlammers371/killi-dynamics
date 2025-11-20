@@ -1,7 +1,6 @@
 """Top-level orchestration for the :mod:`cell_field_dynamics` analysis pipeline."""
 from __future__ import annotations
 
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 from src.data_io.zarr_io import get_metadata
@@ -10,11 +9,10 @@ from src.cell_field_dynamics.config import (
     MaterialsConfig,
     NoiseConfig,
     QCConfig,
-    RunPaths,
     SmoothingConfig,
     WindowConfig,
 )
-from src.cell_field_dynamics import qc, vector_field, metrics, flux, density, grids, io_functions
+from src.cell_field_dynamics import vector_field, flux, density, grids, io_functions, metrics
 from src.data_io.track_io import _load_track_data
 from src.tracking.track_processing import add_sphere_coords_to_tracks, smooth_tracks
 
@@ -53,7 +51,7 @@ def run(
                                             prefer_flow=flows_flag,)
     if deep_cells_only:
         tracks_df = tracks_df[tracks_df["track_class"] == 0]
-        tracks_df = tracks_df[(tracks_df["t"] > 1250) & (tracks_df["t"] <= 1300)]
+        tracks_df = tracks_df[(tracks_df["t"] > 1400) & (tracks_df["t"] <= 1500)]
         # tracks_df = tracks_df[(tracks_df["t"] <= 5)]
         tracks_df = tracks_df.reset_index(drop=True)
 
@@ -110,6 +108,7 @@ def run(
                                     smooth_cfg=smooth_cfg,
                                     step_table=step_table,
                                     neighbors=neighbor_indexers,
+                                    n_workers=n_workers
                                 )
     # msd_results = msd.compute_msd_metrics(smoothed_tracks, binned_tracks, win_cfg, step_table=step_table)
     # material_results = materials.compute_material_metrics(
@@ -195,6 +194,6 @@ if __name__ == "__main__":
         grid_cfg=GridConfig(nsides=[8]),
         smooth_cfg=SmoothingConfig(sigma_space_um=45.0),
         win_cfg=WindowConfig(win_minutes=9.0, stride_minutes=3),
-        n_workers=1,
+        n_workers=12,
     )
     pprint.pprint(result_summary)

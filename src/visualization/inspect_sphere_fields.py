@@ -75,6 +75,7 @@ def visualize_field(
     store_path: str | Path,
     fields: list[tuple[str, str]],     # <-- NEW: list of (group, dataset)
     nside: int,
+    rolling_window: int | None = None,
     start_index: int = 0,
     stop_index: int = None,
     sphere_radius: float = 500.0,
@@ -92,7 +93,7 @@ def visualize_field(
     if stop_index is None:
         stop_index = field0.shape[0]
 
-    T = stop_index - start_index
+    # T = stop_index - start_index
 
     # Build smooth sphere ONCE
     verts, faces = make_sphere_mesh(
@@ -108,12 +109,26 @@ def visualize_field(
     for group, dataset in fields:
 
         field = load_field(store_path, group, dataset)
+        if rolling_window is None:
+            # original behavior
+            field = np.nanmean(field[:-1], axis=0)
+        else:
+            # rolling average across time dimension
+            T, P = field.shape
+            k = rolling_window
+            field_roll = np.full((T, P), np.nan, dtype=field.dtype)
 
-        # Precompute per-vertex sampled values: (T, Nverts)
+            for t in range(T):
+                start = max(0, t - k + 1)
+                end = t + 1
+                field_roll[t] = np.nanmean(field[start:end], axis=0)
+
+            field = field_roll
+            # Precompute per-vertex sampled values: (T, Nverts)
         vtx_vals_ts = np.empty((T, verts.shape[0]), dtype=np.float32)
         for i, t in enumerate(range(start_index, stop_index)):
             vtx_vals_ts[i] = sample_healpix(field[t], verts, nside)
-
+        # vtx_vals_ts = sample_healpix(field, verts, nside)
         # Add a surface layer for this dataset
         viewer.add_surface(
             (verts, faces, vtx_vals_ts),
@@ -141,10 +156,11 @@ if __name__ == "__main__":
         store_path=store,
         fields=[
             ("density", "field"),
-            ("metrics", "alignment"),
-            ("metrics", "drift_speed"),
+            ("metrics", "path_speed"),
+            ("metrics", "diffusivity_total"),
         ],
         nside=8,
+        rolling_window=7,
         sphere_radius=500.0,
         subdivisions=6,
     )

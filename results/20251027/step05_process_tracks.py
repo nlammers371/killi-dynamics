@@ -15,45 +15,45 @@ from src.tracking.track_processing import smooth_tracks_wrapper, find_dropped_nu
 from pathlib import Path
 
 if __name__ == "__main__":
-    # root = Path(r"Y:\killi_dynamics")
-    root = Path("/media/nick/hdd011/killi_dynamics/")
+    root = Path(r"Y:\killi_dynamics")
+    # root = Path("/media/nick/hdd011/killi_dynamics/")
     project_name = "20251019_BC1-NLS_52-80hpf"
     tracking_config = "tracking_20251102"
-    flows_flag = False #True
+    flows_flag = True
     well_num = None
-    n_workers = 1
+    n_workers = 12
     seg_type = "li_segmentation"
     mdl_path = Path(r"C:\Users\nlammers\Projects\killi-dynamics\src\classify_nuclei\models\nucleus_rf_classifier_v0.joblib")
 
     # first extract foreground intensities. Creates lightweight zarr arrays with only pixels within masks
-    extract_foreground_intensities(root, project_name, n_workers=n_workers, overwrite=False)
-    compute_mean_fluo_from_foreground(root=root,
-                                      project_name=project_name,
-                                      tracking_config=tracking_config,
-                                      n_workers=n_workers,
-                                      overwrite=False)
-
-    # stitch tracks?
-
-    # process frames to build feature dataframe
-    feature_df = build_tracked_mask_features(
-                                root=root,
-                                project_name=project_name,
-                                seg_type=seg_type,
-                                tracking_config=tracking_config,
-                                well_num=well_num,
-                                use_foreground=True,
-                                used_optical_flow=flows_flag,
-                                n_workers=n_workers,
-                                mask_field="clean")
-
-    classify_cell_tracks(
-        root=root,
-        project_name=project_name,
-        tracking_config=tracking_config,
-        used_optical_flow=flows_flag,
-        classifier_path=mdl_path
-    )
+    # extract_foreground_intensities(root, project_name, n_workers=n_workers, overwrite=False)
+    # compute_mean_fluo_from_foreground(root=root,
+    #                                   project_name=project_name,
+    #                                   tracking_config=tracking_config,
+    #                                   n_workers=n_workers,
+    #                                   overwrite=False)
+    #
+    # # stitch tracks?
+    #
+    # # process frames to build feature dataframe
+    # feature_df = build_tracked_mask_features(
+    #                             root=root,
+    #                             project_name=project_name,
+    #                             seg_type=seg_type,
+    #                             tracking_config=tracking_config,
+    #                             well_num=well_num,
+    #                             use_foreground=True,
+    #                             used_optical_flow=flows_flag,
+    #                             n_workers=n_workers,
+    #                             mask_field="clean")
+    #
+    # classify_cell_tracks(
+    #     root=root,
+    #     project_name=project_name,
+    #     tracking_config=tracking_config,
+    #     used_optical_flow=flows_flag,
+    #     classifier_path=mdl_path
+    # )
 
     # smooth tracks
     smoothed_tracks = smooth_tracks_wrapper(root=root,
@@ -61,19 +61,19 @@ if __name__ == "__main__":
                                             tracking_config=tracking_config,
                                             used_flow=flows_flag,
                                             n_workers=n_workers,
-                                            overwrite=False,
+                                            overwrite=True,
                                             tracking_range=None)
 
     # ---------------------------
     # Attend to cells that were dropped during tracking
     # ---------------------------
     # add missed nuclei?
-    find_dropped_nuclei(root=root,
-                        project_name=project_name,
-                        tracking_config=tracking_config,
-                        used_optical_flow=flows_flag,
-                        overwrite=False,
-                        n_workers=n_workers)
+    # find_dropped_nuclei(root=root,
+    #                     project_name=project_name,
+    #                     tracking_config=tracking_config,
+    #                     used_optical_flow=flows_flag,
+    #                     overwrite=False,
+    #                     n_workers=n_workers)
 
 
     # build_tracked_mask_features(
