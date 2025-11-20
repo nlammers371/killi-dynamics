@@ -8,7 +8,153 @@ from src.data_io.track_io import _load_tracks
 from functools import partial
 import zarr
 from skimage.measure import regionprops_table
+from tqdm import tqdm
 
+def preprocess_tracks(df, ROLL_W=5, MOVE_THRESH=1.0, OVERLAP_MIN=5, MERGE_DIST=5.0):
+    df = df.sort_values(["track_id", "t"]).copy()
+
+    # ============================================================
+    # (ii) Add track length (frames)
+    # ============================================================
+    df["track_len"] = df.groupby("track_id")["t"].transform("count")
+
+    # ============================================================
+    # (i) Flag stationary frames using rolling mean step length
+    # ============================================================
+    # frame-to-frame displacement per track
+    df["dx"] = df.groupby("track_id")["x"].diff()
+    df["dy"] = df.groupby("track_id")["y"].diff()
+    df["dz"] = df.groupby("track_id")["z"].diff()
+    df["step_len"] = np.sqrt(df["dx"]**2 + df["dy"]**2 + df["dz"]**2)
+
+    # rolling mean step length (ignore NaNs)
+    df["roll_move"] = (
+        df.groupby("track_id")["step_len"]
+          .rolling(ROLL_W, min_periods=1)
+          .mean()
+          .reset_index(level=0, drop=True)
+    )
+
+    df["is_stationary"] = df["roll_move"] < MOVE_THRESH
+
+    # track-level summary (optional)
+    df["track_mostly_stationary"] = (
+        df.groupby("track_id")["is_stationary"]
+          .transform(lambda x: x.mean() > 0.7)
+    )
+
+    # ============================================================
+    # (iii) Fuse duplicate / parallel tracks
+    # ============================================================
+    # Identify overlapping + spatially co-located tracks
+    # track_ids = df["track_id"].unique()
+    # track_bounds = (
+    #     df.groupby("track_id")["t"]
+    #     .agg(["min", "max"])
+    #     .rename(columns={"min": "t0", "max": "t1"})
+    # )
+
+    # # build adjacency list for track-merge graph
+    # merge_edges = []
+    #
+    # for i, tid1 in enumerate(track_ids):
+    #     t0_1, t1_1 = track_bounds.loc[tid1, ["t0", "t1"]]
+    #     df1 = df[df.track_id == tid1]
+    #
+    #     for tid2 in track_ids[i+1:]:
+    #         t0_2, t1_2 = track_bounds.loc[tid2, ["t0", "t1"]]
+    #
+    #         # temporal overlap
+    #         overlap_start = max(t0_1, t0_2)
+    #         overlap_end   = min(t1_1, t1_2)
+    #         if overlap_end - overlap_start < OVERLAP_MIN:
+    #             continue
+    #
+    #         # spatial proximity check
+    #         df2 = df[df.track_id == tid2]
+    #         merged = df1.merge(df2, on="t", suffixes=("_1","_2"))
+    #         if len(merged) < OVERLAP_MIN:
+    #             continue
+    #
+    #         dist = np.sqrt(
+    #             (merged["x_1"]-merged["x_2"])**2
+    #             + (merged["y_1"]-merged["y_2"])**2
+    #             + (merged["z_1"]-merged["z_2"])**2
+    #         )
+    #
+    #         if dist.median() < MERGE_DIST:
+    #             merge_edges.append((tid1, tid2))
+    #
+    # # build connected components of merge graph
+    # # (each component = tracks that belong to one cell)
+    # adj = {}
+    # for a, b in merge_edges:
+    #     adj.setdefault(a, set()).add(b)
+    #     adj.setdefault(b, set()).add(a)
+    #
+    # # DFS to get connected components
+    # visited = set()
+    # components = []
+    #
+    # for tid in track_ids:
+    #     if tid in visited:
+    #         continue
+    #     stack = [tid]
+    #     comp = []
+    #     while stack:
+    #         u = stack.pop()
+    #         if u in visited:
+    #             continue
+    #         visited.add(u)
+    #         comp.append(u)
+    #         for v in adj.get(u, []):
+    #             if v not in visited:
+    #                 stack.append(v)
+    #     components.append(sorted(comp))
+    #
+    # # ============================================================
+    # # Fuse tracks inside each component
+    # # ============================================================
+    # fused_rows = []
+    #
+    # for comp in components:
+    #     if len(comp) == 0:
+    #         continue
+    #     elif len(comp) == 1:
+    #         fused_rows.append(df[df.track_id == comp[0]])
+    #         continue
+    #
+    #     # choose earliest track ID as representative
+    #     rep = comp[0]
+    #
+    #     # pull all rows for all tracks in this component
+    #     sub = df[df.track_id.isin(comp)]
+    #
+    #     # fuse by averaging positions per frame
+    #     fused = (
+    #         sub.groupby("t")
+    #            .agg({"x": "mean", "y": "mean", "z": "mean",
+    #                  "step_len": "mean",
+    #                  "roll_move": "mean",
+    #                  "parent_track_id": "max",  # keep highest parent ID
+    #                  "is_stationary": "all",
+    #                  "track_mostly_stationary": "all"})  # any = true if any frame stationary
+    #            .reset_index()
+    #     )
+    #     fused["track_id"] = rep
+    #     fused_rows.append(fused)
+    #
+    # clean_df = pd.concat(fused_rows, ignore_index=True)
+    # clean_df = clean_df.sort_values(["track_id", "t"]).reset_index(drop=True)
+    #
+    # # recompute track_len after fusion
+    # clean_df["track_len"] = clean_df.groupby("track_id")["t"].transform("count")
+
+    # clean_df["track_id"] = clean_df["track_id"].astype(int)
+    # clean_df.loc[np.isnan(clean_df["parent_track_id"]), "parent_track_id"] = -1
+    # clean_df["parent_track_id"] = clean_df["parent_track_id"].astype(int)
+
+    return df
 def _smooth_single_track(group: pd.DataFrame,
                          coord_cols: list[str],
                          sg_window_frames: int,
@@ -79,9 +225,11 @@ def smooth_tracks(tracks: pd.DataFrame,
             unit="track",
         )
     else:
-        smoothed_groups = [
-            _smooth_single_track(g, coord_cols, sg_window_frames, sg_poly) for g in groups
-        ]
+        smoothed_groups = []
+        for g in tqdm(groups, desc="Smoothing tracks (serial)", unit="track"):
+            sg = _smooth_single_track(g, coord_cols, sg_window_frames, sg_poly)
+            smoothed_groups.append(sg)
+
 
     # flatten list-of-lists → list-of-dicts-
     rows = [row for chunk in smoothed_groups for row in chunk]

@@ -9,9 +9,9 @@ from tqdm.contrib.concurrent import process_map
 from functools import partial
 from magicgui import magicgui
 from pathlib import Path
-
+from src.sphere_viewer.app_helpers import process_tracks, compute_appearance_hp_region
 # if you have this in your project, keep it; otherwise stub it
-from src.data_io.track_io import _load_track_data
+from src.data_io.track_io import _load_track_data, _load_tracks
 
 
 def add_backdrop_sphere(
@@ -255,44 +255,95 @@ def add_timeaware_points_layer(
     point_var="mean_fluo",
     size=0.02,
 ):
-    # merge sphere geom
+    # -------------------------------
+    # Merge sphere geom
+    # -------------------------------
     m = tracks_sub.merge(
         sphere_sub[["t", "cx", "cy", "cz", "radius", "d_cx", "d_cy", "d_cz"]],
         on="t",
         how="left",
     )
 
-    m["t"] = m["t"] - m["t"].min()  # make time start at 0
+    # Reset time origin
+    m["t"] = m["t"] - m["t"].min()
 
-    # c_vecs = m[["x", "y", "z"]].to_numpy() - m[["cx", "cy", "cz"]].to_numpy()
-    # c_unit = c_vecs / np.linalg.norm(c_vecs, axis=1, keepdims=True)
-    # coords = c_unit * m["radius"].to_numpy()[:, None] + m[["cx", "cy", "cz"]].to_numpy() + m[["d_cx", "d_cy", "d_cz"]].to_numpy()
+    # Drift-corrected coordinates
     coords = m[["x", "y", "z"]].to_numpy() + m[["d_cx", "d_cy", "d_cz"]].to_numpy()
 
-    # Prepare Napari data (t, z, y, x)
+    # Prepare Napari data: (t, x, y, z)
     pts_data = np.column_stack([m["t"], coords[:, 0], coords[:, 1], coords[:, 2]])
 
-    vals = m[point_var].to_numpy()
+    # --------------------------------
+    # Color logic (unchanged)
+    # --------------------------------
+    vals_raw = m[point_var].to_numpy()
+
+    # 1) Replace NaNs with sentinel
+    sentinel = -1000.0
+    vals = vals_raw.copy()
+    mask_nan = np.isnan(vals)
+    vals[mask_nan] = sentinel
+
     cmap = plt.get_cmap(point_cmap)
 
+    # 2) Floating vs categorical logic unchanged
     if np.issubdtype(vals.dtype, np.floating):
-        normed = (vals - vals.min()) / (vals.max() - vals.min() + 1e-9)
-    else:
-        # simple categorical
-        uniq = np.unique(vals)
-        idx_map = {u: i for i, u in enumerate(uniq)}
-        idx = np.array([idx_map[v] for v in vals], dtype=float)
-        normed = idx / max(len(uniq) - 1, 1)
+        # IMPORTANT: ignore sentinel when computing min/max
+        vmin0 = np.percentile(vals[~mask_nan], 1) if (~mask_nan).any() else 0.0
+        vmax0 = np.percentile(vals[~mask_nan], 99) if (~mask_nan).any() else 1.0
 
+        # Normalization only for non-NaN values
+        normed = np.empty_like(vals, dtype=float)
+        normed[~mask_nan] = (vals[~mask_nan] - vmin0) / (vmax0 - vmin0 + 1e-9)
+        normed[mask_nan] = 0.0  # placeholder (we override color anyway)
+
+    else:
+        uniq = np.unique(vals[~mask_nan])
+        idx_map = {u: i for i, u in enumerate(uniq)}
+        idx = np.array([idx_map[v] if v in idx_map else 0 for v in vals], dtype=float)
+        normed = idx / max(len(uniq) - 1, 1)
+        # vmin0, vmax0 = 0, 1
+
+    # 3) Get the colormap
     face_color = np.asarray(cmap(normed)[:, :4], dtype=np.float32)
 
-    viewer.add_points(
+    # 4) Override NaN/sentinel points to gray
+    face_color[mask_nan] = np.array([0.5, 0.5, 0.5, 1.0], dtype=np.float32)
+
+    # --------------------------------
+    # Add layer
+    # --------------------------------
+    layer = viewer.add_points(
         pts_data,
         size=size,
         face_color=face_color,
         name=f"points_{point_var}",
         blending="translucent",
+
+        # raw values including real NaN preserved
+        properties={point_var: vals_raw},
     )
+
+    # ---------------------------------------------------------
+    # Attach helper method to dynamically rescale the colors
+    # ---------------------------------------------------------
+    def _rescale(new_vmin, new_vmax):
+        vals = layer.properties[point_var]
+
+        # new normalization
+        n = (vals - new_vmin) / (new_vmax - new_vmin + 1e-9)
+        n = np.clip(n, 0, 1)
+
+        cmap = plt.get_cmap(point_cmap)
+        new_fc = cmap(n)[:, :4].astype(np.float32)
+        layer.face_color = new_fc
+
+    layer.rescale = _rescale  # attach to layer instance
+
+    # Return the layer in case caller wants to modify it
+    return layer
+
+
 
 def add_tracks_layer(
     viewer,
@@ -352,141 +403,133 @@ def add_tracks_layer(
 def add_interactive_controls(
     viewer,
     tracks,
-    track_id_map_cache,
-    verts,
-    faces,
-    show_patches,
     sphere_df,
+    allowed_vars,
     cell_radius,
-    n_workers=4,
     init_frame_range=None,
 ):
+    from magicgui import magicgui
     from napari.utils.notifications import show_info
 
+    # ---------------------------------------------------------
+    # Frame bookkeeping
+    # ---------------------------------------------------------
     all_frames = np.sort(tracks["t"].unique())
     t_min, t_max = int(all_frames.min()), int(all_frames.max())
 
-    if init_frame_range is not None:
-        frame_init_min = max(t_min, init_frame_range[0])
-        frame_init_max = min(t_max, init_frame_range[1])
+    if init_frame_range:
+        frame_init_min = init_frame_range[0]
+        frame_init_max = init_frame_range[1]
     else:
-        frame_init_min, frame_init_max = t_min, t_min  # start small
+        frame_init_min = frame_init_max = t_min
 
-    def ensure_track_id_map(frames):
-        missing = [t for t in frames if t not in track_id_map_cache]
-        if missing:
-            new_maps = compute_track_id_map(
-                tracks,
-                sphere_df,
-                verts,
-                cell_radius_max=cell_radius,
-                n_workers=n_workers,
-                frame_subset=missing,
-            )
-            track_id_map_cache.update(new_maps)
-            show_info(f"Added {len(missing)} frames to cache.")
-
-    def update_patches(patch_var, patch_cmap, frame_min, frame_max):
-        frames = list(range(frame_min, frame_max + 1))
-        ensure_track_id_map(frames)
-
+    # ---------------------------------------------------------
+    # Remove any existing points/tracks layers
+    # ---------------------------------------------------------
+    def drop_layers(prefix):
         for layer in list(viewer.layers):
-            if "cells_" in layer.name:
+            name = layer.name
+            # napari sometimes appends suffixes like " [1]"
+            if name.startswith(prefix):
                 viewer.layers.remove(layer)
 
-        # stack maps
-        track_id_arr = get_track_id_array(track_id_map_cache, frames)
-
-        # subset tracks to these frames
-        m1 = tracks["t"].values >= frame_min
-        m2 = tracks["t"].values <= frame_max
-        tracks_sub = tracks.loc[m1 & m2].copy()
-
-        add_cell_patches_layer(
-            viewer,
-            verts,
-            faces,
-            track_id_arr,
-            frames,
-            tracks_sub,
-            patch_var=patch_var,
-            patch_cmap=patch_cmap,
-        )
-
+    # ---------------------------------------------------------
+    # Update POINTS
+    # ---------------------------------------------------------
     def update_points(point_var, point_cmap, frame_min, frame_max):
-        for layer in list(viewer.layers):
-            if "points_" in layer.name:
-                viewer.layers.remove(layer)
+        drop_layers("points_")
 
-        m1 = tracks["t"].values >= frame_min
-        m2 = tracks["t"].values <= frame_max
+        if point_var == "appearance_hp_region":
+            tracks["appearance_hp_region"] = compute_appearance_hp_region(
+                tracks,
+                frame_min=controls.frame_min.value,
+                hp_col="hp_region",
+            )
+
+        m1 = tracks["t"] >= frame_min
+        m2 = tracks["t"] <= frame_max
         tracks_sub = tracks.loc[m1 & m2].copy()
 
-        s1 = sphere_df["t"].values >= frame_min
-        s2 = sphere_df["t"].values <= frame_max
+        s1 = sphere_df["t"] >= frame_min
+        s2 = sphere_df["t"] <= frame_max
         sphere_sub = sphere_df.loc[s1 & s2].copy()
 
-        add_timeaware_points_layer(
+        layer = add_timeaware_points_layer(
             viewer,
             tracks_sub,
             sphere_sub,
             point_var=point_var,
             point_cmap=point_cmap,
-            size=cell_radius * 0.5,
+            size=cell_radius,
+        )
+        if point_var == "t_start":
+            layer.rescale(frame_min, frame_max)
+
+    # ---------------------------------------------------------
+    # Update TRACKS
+    # ---------------------------------------------------------
+    def update_tracks(track_var, track_cmap, frame_min, frame_max):
+        drop_layers("tracks_")
+
+        m1 = tracks["t"] >= frame_min
+        m2 = tracks["t"] <= frame_max
+        tracks_sub = tracks.loc[m1 & m2].copy()
+
+        s1 = sphere_df["t"] >= frame_min
+        s2 = sphere_df["t"] <= frame_max
+        sphere_sub = sphere_df.loc[s1 & s2].copy()
+
+        tracks["appearance_hp_region"] = compute_appearance_hp_region(
+            tracks,
+            frame_min=controls.frame_min.value,
+            hp_col="hp_region",
         )
 
+        add_tracks_layer(
+            viewer,
+            tracks_sub,
+            sphere_sub=sphere_sub,
+            track_var=track_var,
+            track_cmap=track_cmap,
+        )
+
+    # ---------------------------------------------------------
+    # MAGICGUI controls — sliders now automatically trigger updates
+    # ---------------------------------------------------------
     @magicgui(
-        patch_var={"widget_type": "ComboBox", "choices": [], "label": "Patch variable"},
-        patch_cmap={"widget_type": "ComboBox", "choices": plt.colormaps(), "label": "Patch colormap"},
-        point_var={"widget_type": "ComboBox", "choices": [], "label": "Point variable"},
-        point_cmap={"widget_type": "ComboBox", "choices": plt.colormaps(), "label": "Point colormap"},
-        frame_min={"widget_type": "Slider", "label": "Start frame", "min": t_min, "max": t_max, "step": 1},
-        frame_max={"widget_type": "Slider", "label": "End frame", "min": t_min, "max": t_max, "step": 1},
-        update_patches_btn={"widget_type": "PushButton", "text": "Update patches"},
-        update_points_btn={"widget_type": "PushButton", "text": "Update points"},
+        point_var={"widget_type": "ComboBox", "choices": allowed_vars},
+        point_cmap={"widget_type": "ComboBox", "choices": plt.colormaps()},
+        track_var={"widget_type": "ComboBox", "choices": allowed_vars},
+        track_cmap={"widget_type": "ComboBox", "choices": plt.colormaps()},
+
+        frame_min={"widget_type": "Slider", "min": t_min, "max": t_max, "step": 1},
+        frame_max={"widget_type": "Slider", "min": t_min, "max": t_max, "step": 1},
     )
     def controls(
-            patch_var=None,
-            patch_cmap="magma",
-            point_var=None,
-            point_cmap="plasma",
-            frame_min=frame_init_min,
-            frame_max=frame_init_max,
-            update_patches_btn=False,
-            update_points_btn=False,
+        point_var="mean_fluo",
+        point_cmap="turbo",
+        track_var="mean_fluo",
+        track_cmap="viridis",
+        frame_min=frame_init_min,
+        frame_max=frame_init_max,
     ):
+        # Live update
         if frame_min > frame_max:
             show_info("Start frame must be <= end frame")
             return
 
-    controls.update_patches_btn.changed.connect(
-        lambda _: update_patches(
-            controls.patch_var.value,
-            controls.patch_cmap.value,
-            controls.frame_min.value,
-            controls.frame_max.value,
-        )
-    )
-    controls.update_points_btn.changed.connect(
-        lambda _: update_points(
-            controls.point_var.value,
-            controls.point_cmap.value,
-            controls.frame_min.value,
-            controls.frame_max.value,
-        )
-    )
+        update_points(point_var, point_cmap, frame_min, frame_max)
+        update_tracks(track_var, track_cmap, frame_min, frame_max)
 
+    # ---------------------------------------------------------
+    # Add dock widget
+    # ---------------------------------------------------------
     viewer.window.add_dock_widget(controls, area="right")
 
-    # Now the widgets are fully initialized, so this works
-    var_choices = list(tracks.columns)
-    controls.patch_var.choices = var_choices
-    controls.point_var.choices = var_choices
+    return controls
 
-    if "track_id" in var_choices:
-        controls.patch_var.value = "track_id"
-    if "mean_fluo" in var_choices:
-        controls.point_var.value = "mean_fluo"
+
+
 
 
 # =====================================================
@@ -499,6 +542,7 @@ def launch_sphere_viewer(
     patch_var="track_id",
     point_var="mean_fluo",
     track_var="mean_fluo",
+    allowed_vars=None,
     show_points=True,
     show_patches=True,
     show_tracks=True,
@@ -509,6 +553,10 @@ def launch_sphere_viewer(
     track_cmap=None,
     frame_range=None,
 ):
+
+    if allowed_vars is None:
+        allowed_vars = list(tracks.columns)
+
     if patch_cmap is None and show_patches:
         patch_cmap = (
             "magma" if np.issubdtype(tracks[patch_var].dtype, np.floating) else "tab20"
@@ -610,18 +658,21 @@ def launch_sphere_viewer(
             track_cmap=track_cmap,
         )
 
-    # add_interactive_controls(
-    #     viewer,
-    #     tracks,
-    #     track_id_map_cache,
-    #     verts,
-    #     faces,
-    #     show_patches,
-    #     sphere_df=sphere,
-    #     cell_radius=cell_radius,
-    #     n_workers=n_workers,
-    #     init_frame_range=frame_range,
-    # )
+    # allowed_vars = list(tracks.columns)
+    tracks["appearance_hp_region"] = compute_appearance_hp_region(
+        tracks,
+        frame_min=frame_subset[0],
+        hp_col="hp_region",
+    )
+
+    add_interactive_controls(
+        viewer,
+        tracks=tracks,
+        sphere_df=sphere,
+        allowed_vars=allowed_vars + ["appearance_hp_region"],  # <–– this is new
+        cell_radius=cell_radius,
+        init_frame_range=frame_range,
+    )
 
     napari.run()
 
@@ -655,17 +706,44 @@ def launch_sv_wrapper(
         prefer_flow=used_flow,
     )
 
+    _, tracking_dir = _load_tracks(
+        root=root,
+        project_name=project_name,
+        tracking_config=tracking_config,
+        prefer_smoothed=True,
+        prefer_flow=used_flow,
+    )
+    metric_file = tracking_dir / "cell_dynamics_metrics.csv"
+    if metric_file.is_file():
+        metrics = pd.read_csv(metric_file)
+        # tracking_dircks = tracks.merge(
+        #     metrics,
+        #     on=["track_id", "t"],
+        #     how="left",
+        # )
+    else:
+        metrics = None
+
     candidate_cols = [
         "mean_fluo",
         "track_class",
         "cluster_id_stitched",
         "parent_track_id",
     ]
-    if deep_cells_only:
-        tracks = tracks.loc[tracks["track_class"] == 0].copy()
+    # if deep_cells_only:
+    #     tracks = tracks.loc[tracks["track_class"] == 0].copy()
+
+    # perform QC and calculate quantities
+    tracks, added_cols = process_tracks(
+        tracks,
+        sphere,
+        metrics,
+        deep_cells_only=deep_cells_only,
+        remove_stationary=True,
+    )
 
     # keep columns
-    tracks = tracks[["t", "track_id", "x", "y", "z"] + candidate_cols]
+    tracks = tracks[["t", "track_id", "x", "y", "z"] + candidate_cols + added_cols]
 
     sphere = sphere[
         ["t", "center_x_smooth", "center_y_smooth", "center_z_smooth", "radius_smooth"]
@@ -683,6 +761,7 @@ def launch_sv_wrapper(
         sphere,
         nside=nside,
         patch_var=patch_var,
+        allowed_vars=candidate_cols + added_cols,
         point_var=point_var,
         track_var=track_var,
         show_points=show_points,
@@ -707,7 +786,7 @@ if __name__ == "__main__":
         show_points=True,
         show_tracks=True,
         show_patches=False,
-        frame_range=(935, 1598),
-        cell_radius=12.5,
-        n_workers=12,
+        frame_range=(800, 930),
+        cell_radius=18,
+        n_workers=1,
     )

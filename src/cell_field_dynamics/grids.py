@@ -3,57 +3,41 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Iterable
-
+from tqdm import tqdm
 import numpy as np
 import pandas as pd
 
-from .config import GridConfig, WindowConfig
+from src.cell_field_dynamics.config import GridConfig, WindowConfig
+from src.cell_field_dynamics.config import SmoothingConfig
+from astropy_healpix import HEALPix
+import astropy.units as u
 
-try:  # pragma: no cover - optional dependency
-    import healpy as _hp
+def _healpix_obj(nside: int) -> HEALPix:
+    return HEALPix(nside, order="ring")
 
-    def healpix_nside2npix(nside: int) -> int:
-        return int(_hp.nside2npix(nside))
+def healpix_nside2npix(nside: int) -> int:
+    return 12 * int(nside) ** 2
 
-    def healpix_ang2pix(nside: int, theta: np.ndarray, phi: np.ndarray) -> np.ndarray:
-        return _hp.ang2pix(nside, theta, phi, nest=False)
+def healpix_ang2pix(nside: int, theta: np.ndarray, phi: np.ndarray) -> np.ndarray:
+    hp_obj = _healpix_obj(int(nside))
+    theta = np.asarray(theta)
+    phi = np.asarray(phi)
+    lon = phi
+    lat = np.pi / 2 - theta
+    return hp_obj.lonlat_to_healpix(lon * u.rad, lat * u.rad).astype(int)
 
-    def healpix_pix2ang(nside: int, pix: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        return _hp.pix2ang(nside, pix, nest=False)
+def healpix_pix2ang(nside: int, pix: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    hp_obj = _healpix_obj(int(nside))
+    pix = np.asarray(pix, dtype=int)
+    lon, lat = hp_obj.healpix_to_lonlat(pix)
+    phi = lon.to_value(u.rad)
+    theta = (np.pi / 2.0) - lat.to_value(u.rad)
+    return theta, phi
 
-    def healpix_pix2vec(nside: int, pix: np.ndarray) -> np.ndarray:
-        return np.asarray(_hp.pix2vec(nside, pix, nest=False)).T
-
-except ModuleNotFoundError:  # pragma: no cover - fallback path
-    from astropy_healpix import HEALPix
-    import astropy.units as u
-
-    def _healpix_obj(nside: int) -> HEALPix:
-        return HEALPix(nside, order="ring")
-
-    def healpix_nside2npix(nside: int) -> int:
-        return 12 * int(nside) ** 2
-
-    def healpix_ang2pix(nside: int, theta: np.ndarray, phi: np.ndarray) -> np.ndarray:
-        hp_obj = _healpix_obj(int(nside))
-        theta = np.asarray(theta)
-        phi = np.asarray(phi)
-        lon = phi
-        lat = np.pi / 2 - theta
-        return hp_obj.lonlat_to_healpix(lon * u.rad, lat * u.rad).astype(int)
-
-    def healpix_pix2ang(nside: int, pix: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        hp_obj = _healpix_obj(int(nside))
-        pix = np.asarray(pix, dtype=int)
-        lon, lat = hp_obj.healpix_to_lonlat(pix)
-        phi = lon.to_value(u.rad)
-        theta = (np.pi / 2.0) - lat.to_value(u.rad)
-        return theta, phi
-
-    def healpix_pix2vec(nside: int, pix: np.ndarray) -> np.ndarray:
-        theta, phi = healpix_pix2ang(nside, pix)
-        sin_theta = np.sin(theta)
-        return np.column_stack((sin_theta * np.cos(phi), sin_theta * np.sin(phi), np.cos(theta)))
+def healpix_pix2vec(nside: int, pix: np.ndarray) -> np.ndarray:
+    theta, phi = healpix_pix2ang(nside, pix)
+    sin_theta = np.sin(theta)
+    return np.column_stack((sin_theta * np.cos(phi), sin_theta * np.sin(phi), np.cos(theta)))
 
 
 @dataclass(slots=True)
@@ -91,10 +75,57 @@ class GridBinResult:
     counts: np.ndarray
 
 
-def build_healpix_indexers(nsides: Iterable[int]) -> dict[int, HealpixIndexer]:
-    """Create a :class:`HealpixIndexer` for each requested ``nside`` value."""
+# def build_healpix_indexers(nsides: Iterable[int]) -> dict[int, HealpixIndexer]:
+#     """Create a :class:`HealpixIndexer` for each requested ``nside`` value."""
+#
+#     return {int(nside): HealpixIndexer(int(nside)) for nside in nsides}
 
-    return {int(nside): HealpixIndexer(int(nside)) for nside in nsides}
+def build_healpix_indexers(nsides: Iterable[int],
+                           smooth_cfg: SmoothingConfig = SmoothingConfig()) -> tuple[dict[int, HealpixIndexer], dict[int, list[np.ndarray]]]:
+    indexers = {}
+    neighbors = {}
+
+    sigma_radians = smooth_cfg.sigma_radians
+    for nside in nsides:
+        idxr = HealpixIndexer(int(nside))
+        indexers[nside] = idxr
+
+        # determine angular radius corresponding to spatial sigma
+        if sigma_radians is None:
+            npix_total = healpix_nside2npix(nside)
+            pixel_area = 4.0 * np.pi / npix_total
+            sigma_radians = np.sqrt(pixel_area)  # rough estimate
+
+        neighbors[nside] = precompute_healpix_neighbors(nside, 2*sigma_radians) # keep everything out to 2 sigma
+
+    return indexers, neighbors
+
+
+def precompute_healpix_neighbors(nside: int, ang_radius: float) -> list[np.ndarray]:
+    """
+    For each pixel p, return array of neighbors q such that
+        angular_distance(p, q) <= ang_radius.
+
+    ang_radius in radians.
+    """
+
+    npix = healpix_nside2npix(nside)
+    pix_ids = np.arange(npix)
+
+    # pixel centers as unit vectors
+    centers = healpix_pix2vec(nside, pix_ids)   # (npix, 3)
+
+    neighbors = []
+    for p in tqdm(range(npix), desc="Precomputing HEALPix neighbors"):
+        v = centers[p]
+        # dot = cos(angle)
+        dot = centers @ v
+        dot = np.clip(dot, -1.0, 1.0)
+        ang = np.arccos(dot)
+        mask = ang <= ang_radius
+        neighbors.append(pix_ids[mask])
+
+    return neighbors
 
 
 def _compute_time_centers(tracks: pd.DataFrame, win_cfg: WindowConfig, time_col: str) -> np.ndarray:
@@ -117,8 +148,8 @@ def _bin_single_grid(
     tracks: pd.DataFrame,
     indexer: HealpixIndexer,
     grid_cfg: GridConfig,
-    win_cfg: WindowConfig,
-) -> GridBinResult:
+    win_cfg: WindowConfig) -> GridBinResult:
+
     time_col = grid_cfg.time_col
     theta_col, phi_col = grid_cfg.pos_cols_2d
 

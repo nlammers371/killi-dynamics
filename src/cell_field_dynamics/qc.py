@@ -2,13 +2,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-
-from .config import QCConfig
-from .grids import GridBinResult
-from .metrics import MetricCollection
-from .msd import MSDResult
-from .materials import MaterialMetrics
-from .vector_field import VectorFieldResult
+import numpy as np
+from src.cell_field_dynamics.config import QCConfig
+from src.cell_field_dynamics.grids import GridBinResult
 
 
 @dataclass(slots=True)
@@ -23,11 +19,11 @@ class QCResult:
 
 def apply_quality_control(
     binned: dict[int, GridBinResult],
-    metric_results: dict[int, MetricCollection],
-    vector_results: dict[int, VectorFieldResult],
-    msd_results: dict[int, MSDResult],
-    material_results: dict[int, MaterialMetrics],
-    flux_results: dict[int, dict[str, np.ndarray]],
+    # metric_results: dict[int, MetricCollection],
+    # vector_results: dict[int, VectorFieldResult],
+    # msd_results: dict[int, MSDResult],
+    # material_results: dict[int, MaterialMetrics],
+    # flux_results: dict[int, dict[str, np.ndarray]],
     qc_cfg: QCConfig,
 ) -> dict[int, QCResult]:
     """Derive simple QC masks based on observation counts."""
@@ -36,7 +32,7 @@ def apply_quality_control(
 
     for nside, grid_result in binned.items():
         counts = grid_result.counts.astype(np.int32)
-        nt, npix = counts.shape
+        # nt, npix = counts.shape
         masks: dict[str, np.ndarray] = {}
         per_metric_counts: dict[str, np.ndarray] = {}
 
