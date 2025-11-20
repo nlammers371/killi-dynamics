@@ -219,16 +219,21 @@ def _vel_corr_single_frame(subdf, full_df, window, radius):
     """
     pts   = subdf[["x", "y", "z"]].to_numpy(float)
     tids  = subdf["track_id"].to_numpy()
-    tvals = subdf["t"].to_numpy()
+    tval = subdf["t"].iloc[0]
     n     = len(subdf)
 
     # ---- collect velocity windows (variable length) ----
-    vel_list = []
-    for tid, t in zip(tids, tvals):
-        mask = (full_df["track_id"] == tid) & \
-               (full_df["t"].between(t - window, t + window))
-        v = full_df.loc[mask, ["vx", "vy", "vz"]].to_numpy(float)
-        vel_list.append(v.reshape(-1))   # flatten
+    t_filter = np.where((full_df["t"] >= tval - window) & \
+               (full_df["t"] <= tval + window))[0]
+    window_df = full_df.iloc[t_filter].sort_values(by=["track_id", "t"])
+    v_window = window_df[["vx", "vy", "vz"]].to_numpy(float)
+    tid_window = window_df["track_id"].to_numpy()
+    # vel_list = []
+    # for tid, t in zip(tids, tvals):
+    #     mask = (full_df["track_id"] == tid) & \
+    #            (full_df["t"].between(t - window, t + window))
+    #     v = full_df.loc[mask, ["vx", "vy", "vz"]].to_numpy(float)
+    #     vel_list.append(v.reshape(-1))   # flatten
 
     # ---- pad ----
     maxL = max(len(v) for v in vel_list)
@@ -242,12 +247,6 @@ def _vel_corr_single_frame(subdf, full_df, window, radius):
 
     out = np.full(n, np.nan)
     for i_local, neigh in enumerate(nn_list):
-        neigh = neigh[neigh != i_local]
-        if len(neigh) == 0:
-            continue
-
-        vi = vel_ts[i_local]
-        valid_i = np.isfinite(vi)
 
         cors = []
         for j in neigh:
@@ -278,22 +277,30 @@ def compute_windowed_velocity_corr(
                   radius=radius)
 
     sub_window = window // 2
+
+    # ------------------------------------------------------------
+    # Serial path — unchanged
+    # ------------------------------------------------------------
     if n_workers == 1:
-        for t in tqdm(time_index, desc="vel-corr"):
-            t_indices = (time_index <= t + sub_window) & (time_index >= t - sub_window)
-            subdf = pd.concat([frames[t] for t in t_indices], ignore_index=True)
+        for subdf in tqdm(frames, desc="vel-corr"):
             out_frame, idxs = run(subdf)
             out[idxs] = out_frame
+
+    # ------------------------------------------------------------
+    # Threaded parallel path — only change
+    # ------------------------------------------------------------
     else:
-        results = process_map(
-            run,
-            frames,
+        results = thread_map(
+            run,           # SAME worker
+            frames,        # SAME frames list
             max_workers=n_workers,
             chunksize=1,
-            desc="vel-corr-par",
+            desc="vel-corr (threads)",
         )
+
         for out_frame, idxs in results:
             out[idxs] = out_frame
 
     return out
+
 
